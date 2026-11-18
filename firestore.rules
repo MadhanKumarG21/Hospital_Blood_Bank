@@ -68,7 +68,13 @@ service cloud.firestore {
     }
     match /donors/{id} {
       allow read: if activeUser();
-      allow create, update: if hasRole(['admin', 'nurse_phlebotomist', 'receptionist']);
+      allow create: if hasRole(['admin', 'nurse_phlebotomist', 'receptionist']);
+      allow update: if hasRole(['admin', 'nurse_phlebotomist', 'receptionist'])
+        || (hasRole(['lab_tech'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['bloodGroup', 'bloodGroupVerified'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasAny(['bloodGroup', 'bloodGroupVerified'])
+          && request.resource.data.bloodGroup in ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+          && request.resource.data.bloodGroupVerified == true);
       allow delete: if canManage();
     }
     match /donations/{id} {

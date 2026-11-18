@@ -1,55 +1,1263 @@
-'use client'
+"use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import useSWR from 'swr'
-import Link from 'next/link'
-import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Download, Search, ShieldAlert, Trash2 } from 'lucide-react'
-import { AppShell } from '@/components/app-shell'
-import { createBloodCamp, createBloodRequest, createCollection, discardBloodUnit, donationEligibility, getWorkflowData, loadCurrentStaffRole, loadWorkflowData, recordBloodTests, saveSettings, settings, type Infection } from '@/lib/db/workflows'
-import type { BloodGroup } from '@/lib/types'
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import useSWR from "swr";
+import Link from "next/link";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  CheckCircle2,
+  Download,
+  Search,
+  ShieldAlert,
+  Trash2,
+} from "lucide-react";
+import { AppShell } from "@/components/app-shell";
+import {
+  createBloodCamp,
+  createBloodRequest,
+  createCollection,
+  discardBloodUnit,
+  donationEligibility,
+  getWorkflowData,
+  loadCurrentStaffRole,
+  loadWorkflowData,
+  recordBloodTests,
+  saveSettings,
+  settings,
+  type Infection,
+} from "@/lib/db/workflows";
+import type { BloodGroup } from "@/lib/types";
 
-const groups: BloodGroup[] = ['A+','A-','B+','B-','AB+','AB-','O+','O-']
-const components = ['WHOLE BLOOD','PRBC','PLASMA','PLATELETS','CRYO'] as const
-const titles: Record<string, string> = { collections: 'Collections', collect: 'Donor collection', testing: 'Infection screening', inventory: 'Blood inventory', requests: 'Blood requests', issues: 'Issue register', discards: 'Discard register', camps: 'Blood donation camps', reports: 'Reports & exports', 'audit-log': 'Audit log', settings: 'Blood bank settings', overview: 'Overview' }
-const buttonStyle = 'inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#b91c1c] px-4 text-xs font-semibold text-white hover:bg-[#991b1b] disabled:opacity-50'
-const inputStyle = 'h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 outline-none focus:border-[#cc7777] focus:ring-2 focus:ring-red-100'
-const labelStyle = 'flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600'
-function Panel({ title, description, children, action }: { title: string; description?: string; children: ReactNode; action?: ReactNode }) { return <section className="rounded-xl border border-[#e9edf1] bg-white"><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0f3] px-5 py-4"><div><h2 className="text-sm font-bold text-[#202c39]">{title}</h2>{description&&<p className="mt-1 text-[11px] text-slate-400">{description}</p>}</div>{action}</div><div className="p-5">{children}</div></section> }
-function Status({ value }: { value: string }) { const color = value === 'available' || value === 'Ready' || value === 'negative' ? 'bg-emerald-50 text-emerald-700' : value === 'quarantine' || value === 'reactive' || value === 'emergency' ? 'bg-red-50 text-red-700' : value === 'reserved' || value === 'testing' || value === 'Crossmatching' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-600'; return <span className={`rounded-full px-2.5 py-1 text-[10px] font-semibold capitalize ${color}`}>{value}</span> }
-function Field({ label, children }: { label: string; children: ReactNode }) { return <label className={labelStyle}>{label}{children}</label> }
-function Select({ name, children, defaultValue }: { name: string; children: ReactNode; defaultValue?: string }) { return <select name={name} defaultValue={defaultValue} className={inputStyle}>{children}</select> }
-function Text({ name, type = 'text', defaultValue, placeholder, min, max, step, required = true }: { name: string; type?: string; defaultValue?: string | number; placeholder?: string; min?: number; max?: number; step?: number | 'any'; required?: boolean }) { return <input name={name} type={type} defaultValue={defaultValue} placeholder={placeholder} min={min} max={max} step={step} required={required} className={inputStyle}/> }
-
-export function WorkflowPage({ section, initialNewRequest = false }: { section: string; initialNewRequest?: boolean }) {
- const { data: loadedData, error: loadError, isLoading, mutate } = useSWR('blood-bank-workflows', loadWorkflowData, { fallbackData: getWorkflowData() })
- const { data: currentRole } = useSWR('blood-bank-staff-role', loadCurrentStaffRole)
- const db = loadedData ?? getWorkflowData()
- const [notice, setNotice] = useState('')
- const [error, setError] = useState('')
- const [search, setSearch] = useState('')
- const [filter, setFilter] = useState('all')
- const [query, setQuery] = useState('')
- const [modalId, setModalId] = useState(initialNewRequest ? 'new-request' : '')
- const run = async (action: () => unknown | Promise<unknown>) => { setError(''); setNotice(''); try { const result = await action(); await mutate(); if (result && typeof result === 'object' && 'status' in result && result.status === 'available') setNotice('Screening passed. Unit released to available inventory.'); else setNotice('Changes saved successfully.'); return result } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to complete this action.'); return null } }
- const submit = async (event: FormEvent<HTMLFormElement>, action: (data: FormData) => unknown | Promise<unknown>) => { event.preventDefault(); const form = event.currentTarget; const result = await run(() => action(new FormData(form))); if (result) form.reset(); return result }
- const filteredUnits = useMemo(() => db.units.filter(unit => (filter === 'all' || unit.status === filter) && (!search || `${unit.id} ${unit.bloodGroup} ${unit.component}`.toLowerCase().includes(search.toLowerCase()))), [db.units, filter, search])
- const filteredDonations = db.donations.filter(item => !search || `${item.donorName} ${item.bagNumber}`.toLowerCase().includes(search.toLowerCase()))
- const showNotice = notice || error
- const statusBar = showNotice && <div role={error?'alert':'status'} className={`mb-4 flex items-start gap-2 rounded-lg px-4 py-3 text-xs ${error?'border border-red-200 bg-red-50 text-red-800':'border border-emerald-200 bg-emerald-50 text-emerald-800'}`}>{error?<AlertTriangle size={15}/>:<CheckCircle2 size={15}/>}<span>{error||notice}</span></div>
- const pageTitle = titles[section] || 'Blood bank workspace'
- return <AppShell><main className="mx-auto max-w-[1500px] px-5 py-7 md:px-8 md:py-9"><div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="mb-2 text-[11px] font-semibold uppercase tracking-[.15em] text-[#b91c1c]">Riverside General · Blood bank operations</p><h1 className="text-[27px] font-bold tracking-[-.04em] text-[#182431] sm:text-[31px]">{pageTitle}</h1><p className="mt-1 text-sm text-slate-500">{section === 'collections' ? 'Screen donors, record collections and monitor eligibility.' : section === 'testing' ? 'Complete mandatory infection screening before releasing any unit.' : section === 'requests' ? 'Review, cross-match and safely issue blood components.' : 'Manage hospital blood bank records and daily workflows.'}</p></div>{section==='requests'&&['admin','medical_officer','receptionist'].includes(currentRole||'')&&<button onClick={()=>setModalId('new-request')} className={buttonStyle}>New request</button>}</div>{statusBar}{loadError&&<div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">Unable to load Firestore records. Confirm the staff account is active and the latest Firestore rules are published.</div>}{isLoading&&<p role="status" className="mb-4 text-xs text-slate-500">Loading Firestore records…</p>}
- {section==='collections'&&<div className="grid gap-5 xl:grid-cols-[.85fr_1.4fr]"><Panel title="Eligibility & screening" description="Donation interval and donor deferral are checked before collection"><form onSubmit={(e)=>submit(e,data=>createCollection({ donorId:String(data.get('donorId')), hb:Number(data.get('hb')), weight:Number(data.get('weight')), bp:String(data.get('bp')), pulse:Number(data.get('pulse')), temp:Number(data.get('temp')), campId:String(data.get('campId')||'') }))} className="grid gap-4 sm:grid-cols-2"><Field label="Select donor"><Select name="donorId"><option value="">Choose an eligible donor</option>{db.donors.map(donor=>{const eligibility=donationEligibility(donor,settings.donationIntervalDays);return <option disabled={!eligibility.eligible} key={donor.id} value={donor.id}>{donor.donorId} · {donor.name}{!eligibility.eligible?' · Not eligible':''}</option>})}</Select></Field><Field label="Hemoglobin (g/dL)"><Text name="hb" type="number" min={1} max={30} step={0.1} defaultValue={13.5}/></Field><Field label="Weight (kg)"><Text name="weight" type="number" min={1} max={300} step={0.1} defaultValue={60}/></Field><Field label="Blood pressure"><Text name="bp" placeholder="120/80"/></Field><Field label="Pulse (bpm)"><Text name="pulse" type="number" min={30} max={180} defaultValue={72}/></Field><Field label="Temperature (°C)"><Text name="temp" type="number" min={34} max={42} step={0.1} defaultValue={36.7}/></Field><Field label="Donation camp"><Select name="campId"><option value="">Hospital walk-in</option>{db.camps.map(camp=><option key={camp.id} value={camp.id}>{camp.name}</option>)}</Select></Field><div className="flex items-end"><button className={buttonStyle}><CheckCircle2 size={15}/> Record 450 mL collection</button></div></form><p className="mt-4 rounded-lg bg-slate-50 p-3 text-[10px] leading-5 text-slate-500">Eligibility: no active deferral, donation interval met, Hb ≥ 12.5 g/dL, weight ≥ 45 kg, pulse 50–100 bpm and temperature ≤ 37.5°C.</p></Panel><Panel title="Recent collections" description="Every collected bag enters testing quarantine"><div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left text-xs"><thead><tr className="border-b text-[10px] uppercase text-slate-400"><th className="py-2">Bag number</th><th>Donor</th><th>Date</th><th>Volume</th><th>Status</th></tr></thead><tbody className="divide-y">{db.donations.map(item=><tr key={item.bagNumber}><td className="py-3 font-semibold text-slate-700">{item.bagNumber}</td><td>{item.donorName}</td><td>{item.date}</td><td>{item.volumeMl} mL</td><td><Status value={item.status}/></td></tr>)}</tbody></table></div></Panel></div>}
- {section==='testing'&&<Panel title="Testing queue" description="A unit is only released when ABO/Rh are confirmed and all five infection screens are negative"><div className="mb-4 flex items-center gap-2"><Search size={15} className="text-slate-400"/><input className={`${inputStyle} max-w-sm`} aria-label="Search donations" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search donor or bag number"/></div><div className="flex flex-col gap-4">{filteredDonations.map(donation=><article key={donation.bagNumber} className="rounded-xl border border-slate-200 p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-bold text-slate-800">{donation.bagNumber} · {donation.donorName}</p><p className="mt-1 text-[10px] text-slate-400">Collected {donation.date} · {donation.volumeMl} mL · Hb {donation.screening.hb} g/dL</p></div><Status value={donation.status}/></div>{donation.status==='testing'&&<form onSubmit={(e)=>submit(e,data=>recordBloodTests({ donationId: donation.id, abo: String(data.get('abo')), rh: String(data.get('rh')) as 'positive'|'negative'|'pending', hiv: String(data.get('hiv')) as Infection, hbsag: String(data.get('hbsag')) as Infection, hcv: String(data.get('hcv')) as Infection, syphilis: String(data.get('syphilis')) as Infection, malaria: String(data.get('malaria')) as Infection }))} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Field label="ABO"><Select name="abo" defaultValue="pending"><option value="pending">Pending</option><option>A</option><option>B</option><option>AB</option><option>O</option></Select></Field><Field label="Rh"><Select name="rh" defaultValue="pending"><option value="pending">Pending</option><option value="positive">Positive</option><option value="negative">Negative</option></Select></Field>{(['hiv','hbsag','hcv','syphilis','malaria'] as const).map(test=><Field key={test} label={test.toUpperCase()}><Select name={test} defaultValue="pending"><option value="pending">Pending</option><option value="negative">Negative</option><option value="reactive">Reactive</option></Select></Field>)}<div className="flex items-end"><button className={buttonStyle}>Save screening</button></div></form>}</article>)}</div></Panel>}
- {section==='inventory'&&<><div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">{['available','quarantine','reserved','issued'].map(status=><div key={status} className="rounded-xl border border-[#e9edf1] bg-white p-4"><p className="text-[11px] capitalize text-slate-500">{status}</p><p className="mt-1 text-2xl font-bold">{db.units.filter(unit=>unit.status===status).length}</p></div>)}</div><Panel title="Component inventory" description="FIFO inventory ordered by nearest expiry"><div className="mb-4 flex flex-wrap gap-2"><input aria-label="Search inventory" className={`${inputStyle} max-w-sm`} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search unit, blood group, component"/><Select name="status" defaultValue={filter}><option value="all">All statuses</option>{['available','quarantine','reserved','issued','testing','expired','discarded'].map(item=><option key={item} value={item}>{item}</option>)}</Select><button className="h-10 rounded-lg border px-3 text-xs" onClick={()=>setFilter((document.querySelector('select[name=status]') as HTMLSelectElement)?.value||'all')}>Apply filter</button><Link href="/issues" className="inline-flex h-10 items-center rounded-lg border px-3 text-xs">Issue register</Link><Link href="/discards" className="inline-flex h-10 items-center rounded-lg border px-3 text-xs">Discard register</Link></div><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead><tr className="border-b text-[10px] uppercase text-slate-400"><th className="py-3">Unit ID</th><th>Group</th><th>Component</th><th>Expiry</th><th>Status</th><th>Actions</th></tr></thead><tbody className="divide-y">{filteredUnits.map(unit=><tr key={unit.id}><td className="py-3 font-semibold">{unit.id}</td><td><span className="rounded bg-red-50 px-2 py-1 font-bold text-red-700">{unit.bloodGroup}</span></td><td>{unit.component}</td><td>{unit.expiryDate}</td><td><Status value={unit.status}/></td><td>{!['discarded','issued'].includes(unit.status)&&['admin','medical_officer'].includes(currentRole||'')&&<button className="inline-flex items-center gap-1 text-red-700" onClick={()=>{const reason=window.prompt('Discard reason (expired, reactive, damaged, other):');if(reason&&window.confirm(`Discard ${unit.id}? This will be recorded in the audit log.`))run(()=>discardBloodUnit(unit.id,reason,'Medical Officer'))}}><Trash2 size={13}/> Discard</button>}</td></tr>)}</tbody></table></div>{filteredUnits.length===0&&<p className="py-8 text-center text-xs text-slate-400">No matching units.</p>}</Panel></>}
- {section==='requests'&&<><div className="mb-4 flex flex-wrap gap-2"><button className={`rounded-lg px-3 py-2 text-xs ${filter==='all'?'bg-red-700 text-white':'border bg-white'}`} onClick={()=>setFilter('all')}>All requests</button>{['emergency','urgent','routine'].map(value=><button key={value} className={`rounded-lg px-3 py-2 text-xs capitalize ${filter===value?'bg-red-700 text-white':'border bg-white'}`} onClick={()=>setFilter(value)}>{value}</button>)}</div><Panel title="Request queue" description="Emergency requests remain at the top of the queue"><div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead><tr className="border-b text-[10px] uppercase text-slate-400"><th className="py-3">Request</th><th>Patient / ward</th><th>Blood group</th><th>Component</th><th>Units</th><th>Urgency</th><th>Status</th><th></th></tr></thead><tbody className="divide-y">{[...db.requests].filter(item=>filter==='all'||item.urgency===filter).sort((a,b)=>['emergency','urgent','routine'].indexOf(a.urgency)-['emergency','urgent','routine'].indexOf(b.urgency)).map(item=><tr key={item.id}><td className="py-3 font-semibold">{item.id}</td><td>{item.patient}<span className="block text-[10px] text-slate-400">{item.ward}</span></td><td><span className="rounded bg-red-50 px-2 py-1 font-bold text-red-700">{item.bloodGroup}</span></td><td>{item.component}</td><td>{item.units}</td><td><Status value={item.urgency}/></td><td><Status value={item.status}/></td><td><Link className="text-red-700" href={`/requests/${encodeURIComponent(item.id)}`}>Open <ArrowRight className="inline" size={13}/></Link></td></tr>)}</tbody></table></div></Panel>{modalId==='new-request'&&<div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4"><section role="dialog" aria-modal="true" aria-labelledby="new-request-title" className="w-full max-w-lg rounded-2xl bg-white p-5"><div className="mb-4 flex justify-between"><div><h2 id="new-request-title" className="font-bold">Create blood request</h2><p className="mt-1 text-xs text-slate-500">Patient blood component request</p></div><button onClick={()=>setModalId('')} aria-label="Close">×</button></div><form onSubmit={(e)=>{const result=submit(e,data=>createBloodRequest({ patient:String(data.get('patient')), age:Number(data.get('age')), gender:String(data.get('gender')), uhid:String(data.get('uhid')), ward:String(data.get('ward')), bloodGroup:String(data.get('bloodGroup')) as BloodGroup, doctor:String(data.get('doctor')), diagnosis:String(data.get('diagnosis')), component:String(data.get('component')), units:Number(data.get('units')), urgency:String(data.get('urgency')) as 'routine'|'urgent'|'emergency' }));void result.then(value=>{if(value)setModalId('')})}} className="grid grid-cols-2 gap-3"><Field label="Patient name"><Text name="patient"/></Field><Field label="Age"><Text name="age" type="number" min={0} max={120}/></Field><Field label="UHID"><Text name="uhid"/></Field><Field label="Ward / bed"><Text name="ward" placeholder="ICU · Bed 08"/></Field><Field label="Patient blood group"><Select name="bloodGroup">{groups.map(group=><option key={group}>{group}</option>)}</Select></Field><Field label="Component"><Select name="component">{components.map(item=><option key={item}>{item}</option>)}</Select></Field><Field label="Units"><Text name="units" type="number" min={1} max={10} defaultValue={1}/></Field><Field label="Urgency"><Select name="urgency"><option value="routine">Routine</option><option value="urgent">Urgent</option><option value="emergency">Emergency</option></Select></Field><Field label="Doctor"><Text name="doctor"/></Field><Field label="Diagnosis"><Text name="diagnosis"/></Field><div className="col-span-2 flex justify-end gap-2 pt-2"><button type="button" onClick={()=>setModalId('')} className="rounded-lg border px-4 text-xs">Cancel</button><button className={buttonStyle}>Create request</button></div></form></section></div>}</>}
- {section==='camps'&&<div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]"><Panel title="Schedule a camp"><form onSubmit={(e)=>submit(e,data=>createBloodCamp({ name:String(data.get('name')), place:String(data.get('place')), date:String(data.get('date')), targetDonors:Number(data.get('target')) }))} className="grid gap-4"><Field label="Camp name"><Text name="name"/></Field><Field label="Venue"><Text name="place"/></Field><Field label="Date"><Text name="date" type="date"/></Field><Field label="Target donors"><Text name="target" type="number" min={1} defaultValue={50}/></Field><button className={buttonStyle}>Schedule camp</button></form></Panel><Panel title="Upcoming & recent camps"><div className="flex flex-col gap-3">{db.camps.map(camp=><div key={camp.id} className="rounded-lg border p-4"><div className="flex justify-between gap-3"><div><h3 className="text-xs font-bold">{camp.name}</h3><p className="mt-1 text-[11px] text-slate-500">{camp.place} · {camp.date}</p></div><span className="text-xs font-semibold text-slate-700">{camp.collectedCount}/{camp.targetDonors}</span></div><div className="mt-3 h-1.5 rounded-full bg-slate-100"><div className="h-1.5 rounded-full bg-[#b91c1c]" style={{width:`${Math.min(100,camp.collectedCount/camp.targetDonors*100)}%`}}/></div></div>)}</div></Panel></div>}
- {section==='issues'&&<Panel title="Issued blood components" description="Issue slips and approval traceability"><Rows rows={db.issues.map(issue=>({id:issue.id,detail:`${issue.issuedTo} · request ${issue.requestId}`,status:issue.emergency?'Emergency':'Issued',date:issue.date.slice(0,10)}))}/></Panel>}
- {section==='discards'&&<Panel title="Discarded units" description="Each discard records a reason and medical officer approval"><Rows rows={db.discards.map(item=>({id:item.unitId,detail:`${item.reason} · approved by ${item.approvedBy}`,status:'Discarded',date:item.date.slice(0,10)}))}/></Panel>}
- {section==='reports'&&<Panel title="Report centre" description="Download current workspace registers as CSV"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[{title:'Donor register',rows:db.donors.map(item=>[item.donorId,item.name,item.phone,item.bloodGroup,item.donorType])},{title:'Collection register',rows:db.donations.map(item=>[item.bagNumber,item.donorName,item.date,item.volumeMl,item.status])},{title:'Stock report',rows:db.units.map(item=>[item.id,item.bloodGroup,item.component,item.expiryDate,item.status])},{title:'Issue register',rows:db.issues.map(item=>[item.id,item.requestId,item.unitId,item.issuedTo,item.date])},{title:'Discard analysis',rows:db.discards.map(item=>[item.id,item.unitId,item.reason,item.approvedBy,item.date])},{title:'Request register',rows:db.requests.map(item=>[item.id,item.patient,item.ward,item.bloodGroup,item.component,item.units,item.urgency,item.status])}].map(report=><button key={report.title} onClick={()=>downloadCsv(report.title,report.rows)} className="flex items-center justify-between rounded-lg border p-4 text-left hover:border-red-200 hover:bg-red-50/30"><span><strong className="block text-xs">{report.title}</strong><small className="mt-1 block text-[10px] text-slate-400">{report.rows.length} records · CSV export</small></span><Download size={16} className="text-red-700"/></button>)}</div><button className="mt-5 rounded-lg border px-4 py-2 text-xs" onClick={()=>window.print()}>Print report</button></Panel>}
- {section==='audit-log'&&<Panel title="Immutable activity log" description="Append-only history of actions taken in this workspace"><div className="mb-4 relative max-w-sm"><Search size={15} className="absolute left-3 top-3 text-slate-400"/><input className={`${inputStyle} pl-9`} aria-label="Search audit log" value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search user, action, entity"/></div><Rows rows={db.audit.filter(item=>`${item.user} ${item.action} ${item.entity} ${item.entityId}`.toLowerCase().includes(query.toLowerCase())).map(item=>({id:item.id,detail:`${item.user} · ${item.entity} ${item.entityId} · ${item.details}`,status:item.action,date:item.timestamp.slice(0,16).replace('T',' ')}))}/></Panel>}
- {section==='settings'&&<Panel title="Blood bank policy settings" description="These values apply to donor eligibility and dashboard alerting"><form onSubmit={(e)=>submit(e,data=>saveSettings({donationIntervalDays:Number(data.get('donationIntervalDays')),expiryAlertDays:Number(data.get('expiryAlertDays')),lowStockThresholds:Object.fromEntries(groups.map(group=>[group,Number(data.get(`threshold-${group}`))])) as Record<BloodGroup,number>}))} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="Donation interval (days)"><Text name="donationIntervalDays" type="number" min={1} defaultValue={settings.donationIntervalDays}/></Field><Field label="Expiry alert (days)"><Text name="expiryAlertDays" type="number" min={1} defaultValue={settings.expiryAlertDays}/></Field>{groups.map(group=><Field key={group} label={`${group} low stock threshold`}><Text name={`threshold-${group}`} type="number" min={0} defaultValue={settings.lowStockThresholds[group]}/></Field>)}<div className="sm:col-span-2 lg:col-span-3"><button className={buttonStyle}>Save policy settings</button></div></form></Panel>}
- {!Object.hasOwn(titles,section)&&<Panel title="Module unavailable"><p className="text-sm text-slate-500">This section does not exist. Use the navigation to open an available module.</p></Panel>}
- </main></AppShell>
+const groups: BloodGroup[] = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
+const components = [
+  "WHOLE BLOOD",
+  "PRBC",
+  "PLASMA",
+  "PLATELETS",
+  "CRYO",
+] as const;
+const titles: Record<string, string> = {
+  collections: "Collections",
+  collect: "Donor collection",
+  testing: "Infection screening",
+  inventory: "Blood inventory",
+  requests: "Blood requests",
+  issues: "Issue register",
+  discards: "Discard register",
+  camps: "Blood donation camps",
+  reports: "Reports & exports",
+  "audit-log": "Audit log",
+  settings: "Blood bank settings",
+  overview: "Overview",
+};
+const buttonStyle =
+  "inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#b91c1c] px-4 text-xs font-semibold text-white hover:bg-[#991b1b] disabled:opacity-50";
+const inputStyle =
+  "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 outline-none focus:border-[#cc7777] focus:ring-2 focus:ring-red-100";
+const labelStyle =
+  "flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600";
+function Panel({
+  title,
+  description,
+  children,
+  action,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <section className="rounded-xl border border-[#e9edf1] bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0f3] px-5 py-4">
+        <div>
+          <h2 className="text-sm font-bold text-[#202c39]">{title}</h2>
+          {description && (
+            <p className="mt-1 text-[11px] text-slate-400">{description}</p>
+          )}
+        </div>
+        {action}
+      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
 }
-function Rows({ rows }: { rows: { id: string; detail: string; status: string; date: string }[] }) { return rows.length ? <div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-xs"><thead><tr className="border-b text-[10px] uppercase text-slate-400"><th className="py-3">Reference</th><th>Details</th><th>Status</th><th>Date</th></tr></thead><tbody className="divide-y">{rows.map(row=><tr key={row.id}><td className="py-3 font-semibold">{row.id}</td><td>{row.detail}</td><td><Status value={row.status}/></td><td>{row.date}</td></tr>)}</tbody></table></div>:<p className="py-8 text-center text-xs text-slate-400">No records yet. New activity will appear here.</p> }
-function downloadCsv(name: string, rows: (string|number)[][]) { const csv = rows.map(row=>row.map(value=>`"${String(value).replaceAll('"','""')}"`).join(',')).join('\n'); const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); const url=URL.createObjectURL(blob); const link=document.createElement('a'); link.href=url; link.download=`${name.toLowerCase().replaceAll(' ','-')}.csv`; link.click(); URL.revokeObjectURL(url) }
+function Status({ value }: { value: string }) {
+  const color =
+    value === "available" || value === "Ready" || value === "negative"
+      ? "bg-emerald-50 text-emerald-700"
+      : value === "quarantine" || value === "reactive" || value === "emergency"
+        ? "bg-red-50 text-red-700"
+        : value === "reserved" ||
+            value === "testing" ||
+            value === "Crossmatching"
+          ? "bg-amber-50 text-amber-700"
+          : "bg-slate-100 text-slate-600";
+  return (
+    <span
+      className={`rounded-full px-2.5 py-1 text-[10px] font-semibold capitalize ${color}`}
+    >
+      {value}
+    </span>
+  );
+}
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className={labelStyle}>
+      {label}
+      {children}
+    </label>
+  );
+}
+function Select({
+  name,
+  children,
+  defaultValue,
+}: {
+  name: string;
+  children: ReactNode;
+  defaultValue?: string;
+}) {
+  return (
+    <select name={name} defaultValue={defaultValue} className={inputStyle}>
+      {children}
+    </select>
+  );
+}
+function Text({
+  name,
+  type = "text",
+  defaultValue,
+  placeholder,
+  min,
+  max,
+  step,
+  required = true,
+}: {
+  name: string;
+  type?: string;
+  defaultValue?: string | number;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  step?: number | "any";
+  required?: boolean;
+}) {
+  return (
+    <input
+      name={name}
+      type={type}
+      defaultValue={defaultValue}
+      placeholder={placeholder}
+      min={min}
+      max={max}
+      step={step}
+      required={required}
+      className={inputStyle}
+    />
+  );
+}
+
+export function WorkflowPage({
+  section,
+  initialNewRequest = false,
+}: {
+  section: string;
+  initialNewRequest?: boolean;
+}) {
+  const {
+    data: loadedData,
+    error: loadError,
+    isLoading,
+    mutate,
+  } = useSWR("blood-bank-workflows", loadWorkflowData, {
+    fallbackData: getWorkflowData(),
+    refreshInterval: 15000,
+    revalidateOnFocus: true,
+  });
+  const { data: currentRole } = useSWR(
+    "blood-bank-staff-role",
+    loadCurrentStaffRole,
+  );
+  const db = loadedData ?? getWorkflowData();
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [modalId, setModalId] = useState(
+    initialNewRequest ? "new-request" : "",
+  );
+  const run = async (action: () => unknown | Promise<unknown>) => {
+    setError("");
+    setNotice("");
+    try {
+      const result = await action();
+      await mutate();
+      if (
+        result &&
+        typeof result === "object" &&
+        "status" in result &&
+        result.status === "available"
+      )
+        setNotice("Screening passed. Unit released to available inventory.");
+      else setNotice("Changes saved successfully.");
+      return result;
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to complete this action.",
+      );
+      return null;
+    }
+  };
+  const submit = async (
+    event: FormEvent<HTMLFormElement>,
+    action: (data: FormData) => unknown | Promise<unknown>,
+  ) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const result = await run(() => action(new FormData(form)));
+    if (result) form.reset();
+    return result;
+  };
+  const filteredUnits = useMemo(
+    () =>
+      db.units.filter(
+        (unit) =>
+          (filter === "all" || unit.status === filter) &&
+          (!search ||
+            `${unit.id} ${unit.bloodGroup} ${unit.component}`
+              .toLowerCase()
+              .includes(search.toLowerCase())),
+      ),
+    [db.units, filter, search],
+  );
+  const filteredDonations = db.donations.filter(
+    (item) =>
+      !search ||
+      `${item.donorName} ${item.bagNumber}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  const expiryLimit = new Date(Date.now() + settings.expiryAlertDays * 86400000)
+    .toISOString()
+    .slice(0, 10);
+  const expiredCount = db.units.filter(
+    (unit) => unit.status === "expired",
+  ).length;
+  const expiringCount = db.units.filter(
+    (unit) =>
+      unit.status === "available" &&
+      unit.expiryDate >= today &&
+      unit.expiryDate <= expiryLimit,
+  ).length;
+  const lowStockGroups = groups.filter(
+    (group) =>
+      db.units.filter(
+        (unit) => unit.status === "available" && unit.bloodGroup === group,
+      ).length < settings.lowStockThresholds[group],
+  );
+  const showNotice = notice || error;
+  const statusBar = (
+    <>
+      {showNotice && (
+        <div
+          role={error ? "alert" : "status"}
+          className={`mb-4 flex items-start gap-2 rounded-lg px-4 py-3 text-xs ${error ? "border border-red-200 bg-red-50 text-red-800" : "border border-emerald-200 bg-emerald-50 text-emerald-800"}`}
+        >
+          {error ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+          <span>{error || notice}</span>
+        </div>
+      )}
+      {section === "inventory" &&
+        (expiredCount > 0 ||
+          expiringCount > 0 ||
+          lowStockGroups.length > 0) && (
+          <div
+            role="status"
+            className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900"
+          >
+            {expiredCount > 0 && (
+              <span className="mr-3 font-semibold">
+                {expiredCount} expired unit(s)
+              </span>
+            )}
+            {expiringCount > 0 && (
+              <span className="mr-3 font-semibold">
+                {expiringCount} expiring within {settings.expiryAlertDays}{" "}
+                day(s)
+              </span>
+            )}
+            {lowStockGroups.length > 0 && (
+              <span>
+                <strong>Low stock:</strong> {lowStockGroups.join(", ")}
+              </span>
+            )}
+          </div>
+        )}
+    </>
+  );
+  const pageTitle = titles[section] || "Blood bank workspace";
+  return (
+    <AppShell>
+      <main className="mx-auto max-w-[1500px] px-5 py-7 md:px-8 md:py-9">
+        <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[.15em] text-[#b91c1c]">
+              Riverside General · Blood bank operations
+            </p>
+            <h1 className="text-[27px] font-bold tracking-[-.04em] text-[#182431] sm:text-[31px]">
+              {pageTitle}
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              {section === "collections"
+                ? "Screen donors, record collections and monitor eligibility."
+                : section === "testing"
+                  ? "Complete mandatory infection screening before releasing any unit."
+                  : section === "requests"
+                    ? "Review, cross-match and safely issue blood components."
+                    : "Manage hospital blood bank records and daily workflows."}
+            </p>
+          </div>
+          {section === "requests" &&
+            ["admin", "medical_officer", "receptionist"].includes(
+              currentRole || "",
+            ) && (
+              <button
+                onClick={() => setModalId("new-request")}
+                className={buttonStyle}
+              >
+                New request
+              </button>
+            )}
+        </div>
+        {statusBar}
+        {loadError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800"
+          >
+            Unable to load Firestore records. Confirm the staff account is
+            active and the latest Firestore rules are published.
+          </div>
+        )}
+        {isLoading && (
+          <p role="status" className="mb-4 text-xs text-slate-500">
+            Loading Firestore records…
+          </p>
+        )}
+        {section === "collections" && (
+          <div className="grid gap-5 xl:grid-cols-[.85fr_1.4fr]">
+            <Panel
+              title="Eligibility & screening"
+              description="Donation interval and donor deferral are checked before collection"
+            >
+              <form
+                onSubmit={(e) =>
+                  submit(e, (data) =>
+                    createCollection({
+                      donorId: String(data.get("donorId")),
+                      hb: Number(data.get("hb")),
+                      weight: Number(data.get("weight")),
+                      bp: String(data.get("bp")),
+                      pulse: Number(data.get("pulse")),
+                      temp: Number(data.get("temp")),
+                      campId: String(data.get("campId") || ""),
+                    }),
+                  )
+                }
+                className="grid gap-4 sm:grid-cols-2"
+              >
+                <Field label="Select donor">
+                  <Select name="donorId">
+                    <option value="">Choose an eligible donor</option>
+                    {db.donors.map((donor) => {
+                      const eligibility = donationEligibility(
+                        donor,
+                        settings.donationIntervalDays,
+                      );
+                      return (
+                        <option
+                          disabled={!eligibility.eligible}
+                          key={donor.id}
+                          value={donor.id}
+                        >
+                          {donor.donorId} · {donor.name}
+                          {!eligibility.eligible ? " · Not eligible" : ""}
+                        </option>
+                      );
+                    })}
+                  </Select>
+                </Field>
+                <Field label="Hemoglobin (g/dL)">
+                  <Text
+                    name="hb"
+                    type="number"
+                    min={1}
+                    max={30}
+                    step={0.1}
+                    defaultValue={13.5}
+                  />
+                </Field>
+                <Field label="Weight (kg)">
+                  <Text
+                    name="weight"
+                    type="number"
+                    min={1}
+                    max={300}
+                    step={0.1}
+                    defaultValue={60}
+                  />
+                </Field>
+                <Field label="Blood pressure">
+                  <Text name="bp" placeholder="120/80" />
+                </Field>
+                <Field label="Pulse (bpm)">
+                  <Text
+                    name="pulse"
+                    type="number"
+                    min={30}
+                    max={180}
+                    defaultValue={72}
+                  />
+                </Field>
+                <Field label="Temperature (°C)">
+                  <Text
+                    name="temp"
+                    type="number"
+                    min={34}
+                    max={42}
+                    step={0.1}
+                    defaultValue={36.7}
+                  />
+                </Field>
+                <Field label="Donation camp">
+                  <Select name="campId">
+                    <option value="">Hospital walk-in</option>
+                    {db.camps.map((camp) => (
+                      <option key={camp.id} value={camp.id}>
+                        {camp.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <div className="flex items-end">
+                  <button className={buttonStyle}>
+                    <CheckCircle2 size={15} /> Record 450 mL collection
+                  </button>
+                </div>
+              </form>
+              <p className="mt-4 rounded-lg bg-slate-50 p-3 text-[10px] leading-5 text-slate-500">
+                Eligibility: no active deferral, donation interval met, Hb ≥
+                12.5 g/dL, weight ≥ 45 kg, pulse 50–100 bpm and temperature ≤
+                37.5°C.
+              </p>
+            </Panel>
+            <Panel
+              title="Recent collections"
+              description="Every collected bag enters testing quarantine"
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[560px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b text-[10px] uppercase text-slate-400">
+                      <th className="py-2">Bag number</th>
+                      <th>Donor</th>
+                      <th>Date</th>
+                      <th>Volume</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {db.donations.map((item) => (
+                      <tr key={item.bagNumber}>
+                        <td className="py-3 font-semibold text-slate-700">
+                          {item.bagNumber}
+                        </td>
+                        <td>{item.donorName}</td>
+                        <td>{item.date}</td>
+                        <td>{item.volumeMl} mL</td>
+                        <td>
+                          <Status value={item.status} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          </div>
+        )}
+        {section === "testing" && (
+          <Panel
+            title="Testing queue"
+            description="A unit is only released when ABO/Rh are confirmed and all five infection screens are negative"
+          >
+            <div className="mb-4 flex items-center gap-2">
+              <Search size={15} className="text-slate-400" />
+              <input
+                className={`${inputStyle} max-w-sm`}
+                aria-label="Search donations"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search donor or bag number"
+              />
+            </div>
+            <div className="flex flex-col gap-4">
+              {filteredDonations.map((donation) => (
+                <article
+                  key={donation.bagNumber}
+                  className="rounded-xl border border-slate-200 p-4"
+                >
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-slate-800">
+                        {donation.bagNumber} · {donation.donorName}
+                      </p>
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        Collected {donation.date} · {donation.volumeMl} mL · Hb{" "}
+                        {donation.screening.hb} g/dL
+                      </p>
+                    </div>
+                    <Status value={donation.status} />
+                  </div>
+                  {donation.status === "testing" && (
+                    <form
+                      onSubmit={(e) =>
+                        submit(e, (data) =>
+                          recordBloodTests({
+                            donationId: donation.id,
+                            abo: String(data.get("abo")),
+                            rh: String(data.get("rh")) as
+                              | "positive"
+                              | "negative"
+                              | "pending",
+                            hiv: String(data.get("hiv")) as Infection,
+                            hbsag: String(data.get("hbsag")) as Infection,
+                            hcv: String(data.get("hcv")) as Infection,
+                            syphilis: String(data.get("syphilis")) as Infection,
+                            malaria: String(data.get("malaria")) as Infection,
+                          }),
+                        )
+                      }
+                      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+                    >
+                      <Field label="ABO">
+                        <Select name="abo" defaultValue="pending">
+                          <option value="pending">Pending</option>
+                          <option>A</option>
+                          <option>B</option>
+                          <option>AB</option>
+                          <option>O</option>
+                        </Select>
+                      </Field>
+                      <Field label="Rh">
+                        <Select name="rh" defaultValue="pending">
+                          <option value="pending">Pending</option>
+                          <option value="positive">Positive</option>
+                          <option value="negative">Negative</option>
+                        </Select>
+                      </Field>
+                      {(
+                        ["hiv", "hbsag", "hcv", "syphilis", "malaria"] as const
+                      ).map((test) => (
+                        <Field key={test} label={test.toUpperCase()}>
+                          <Select name={test} defaultValue="pending">
+                            <option value="pending">Pending</option>
+                            <option value="negative">Negative</option>
+                            <option value="reactive">Reactive</option>
+                          </Select>
+                        </Field>
+                      ))}
+                      <div className="flex items-end">
+                        <button className={buttonStyle}>Save screening</button>
+                      </div>
+                    </form>
+                  )}
+                </article>
+              ))}
+            </div>
+          </Panel>
+        )}
+        {section === "inventory" && (
+          <>
+            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              {["available", "quarantine", "reserved", "issued"].map(
+                (status) => (
+                  <div
+                    key={status}
+                    className="rounded-xl border border-[#e9edf1] bg-white p-4"
+                  >
+                    <p className="text-[11px] capitalize text-slate-500">
+                      {status}
+                    </p>
+                    <p className="mt-1 text-2xl font-bold">
+                      {db.units.filter((unit) => unit.status === status).length}
+                    </p>
+                  </div>
+                ),
+              )}
+            </div>
+            <Panel
+              title="Component inventory"
+              description="FIFO inventory ordered by nearest expiry"
+            >
+              <div className="mb-4 flex flex-wrap gap-2">
+                <input
+                  aria-label="Search inventory"
+                  className={`${inputStyle} max-w-sm`}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search unit, blood group, component"
+                />
+                <Select name="status" defaultValue={filter}>
+                  <option value="all">All statuses</option>
+                  {[
+                    "available",
+                    "quarantine",
+                    "reserved",
+                    "issued",
+                    "testing",
+                    "expired",
+                    "discarded",
+                  ].map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </Select>
+                <button
+                  className="h-10 rounded-lg border px-3 text-xs"
+                  onClick={() =>
+                    setFilter(
+                      (
+                        document.querySelector(
+                          "select[name=status]",
+                        ) as HTMLSelectElement
+                      )?.value || "all",
+                    )
+                  }
+                >
+                  Apply filter
+                </button>
+                <Link
+                  href="/issues"
+                  className="inline-flex h-10 items-center rounded-lg border px-3 text-xs"
+                >
+                  Issue register
+                </Link>
+                <Link
+                  href="/discards"
+                  className="inline-flex h-10 items-center rounded-lg border px-3 text-xs"
+                >
+                  Discard register
+                </Link>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b text-[10px] uppercase text-slate-400">
+                      <th className="py-3">Unit ID</th>
+                      <th>Group</th>
+                      <th>Component</th>
+                      <th>Expiry</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {filteredUnits.map((unit) => (
+                      <tr key={unit.id}>
+                        <td className="py-3 font-semibold">{unit.id}</td>
+                        <td>
+                          <span className="rounded bg-red-50 px-2 py-1 font-bold text-red-700">
+                            {unit.bloodGroup}
+                          </span>
+                        </td>
+                        <td>{unit.component}</td>
+                        <td>{unit.expiryDate}</td>
+                        <td>
+                          <Status value={unit.status} />
+                        </td>
+                        <td>
+                          {!["discarded", "issued"].includes(unit.status) &&
+                            ["admin", "medical_officer"].includes(
+                              currentRole || "",
+                            ) && (
+                              <button
+                                className="inline-flex items-center gap-1 text-red-700"
+                                onClick={() => {
+                                  const reason = window.prompt(
+                                    "Discard reason (expired, reactive, damaged, other):",
+                                  );
+                                  if (
+                                    reason &&
+                                    window.confirm(
+                                      `Discard ${unit.id}? This will be recorded in the audit log.`,
+                                    )
+                                  )
+                                    run(() =>
+                                      discardBloodUnit(
+                                        unit.id,
+                                        reason,
+                                        "Medical Officer",
+                                      ),
+                                    );
+                                }}
+                              >
+                                <Trash2 size={13} /> Discard
+                              </button>
+                            )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filteredUnits.length === 0 && (
+                <p className="py-8 text-center text-xs text-slate-400">
+                  No matching units.
+                </p>
+              )}
+            </Panel>
+          </>
+        )}
+        {section === "requests" && (
+          <>
+            <div className="mb-4 flex flex-wrap gap-2">
+              <button
+                className={`rounded-lg px-3 py-2 text-xs ${filter === "all" ? "bg-red-700 text-white" : "border bg-white"}`}
+                onClick={() => setFilter("all")}
+              >
+                All requests
+              </button>
+              {["emergency", "urgent", "routine"].map((value) => (
+                <button
+                  key={value}
+                  className={`rounded-lg px-3 py-2 text-xs capitalize ${filter === value ? "bg-red-700 text-white" : "border bg-white"}`}
+                  onClick={() => setFilter(value)}
+                >
+                  {value}
+                </button>
+              ))}
+            </div>
+            <Panel
+              title="Request queue"
+              description="Emergency requests remain at the top of the queue"
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[700px] text-left text-xs">
+                  <thead>
+                    <tr className="border-b text-[10px] uppercase text-slate-400">
+                      <th className="py-3">Request</th>
+                      <th>Patient / ward</th>
+                      <th>Blood group</th>
+                      <th>Component</th>
+                      <th>Units</th>
+                      <th>Urgency</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {[...db.requests]
+                      .filter(
+                        (item) => filter === "all" || item.urgency === filter,
+                      )
+                      .sort(
+                        (a, b) =>
+                          ["emergency", "urgent", "routine"].indexOf(
+                            a.urgency,
+                          ) -
+                          ["emergency", "urgent", "routine"].indexOf(b.urgency),
+                      )
+                      .map((item) => (
+                        <tr key={item.id}>
+                          <td className="py-3 font-semibold">{item.id}</td>
+                          <td>
+                            {item.patient}
+                            <span className="block text-[10px] text-slate-400">
+                              {item.ward}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="rounded bg-red-50 px-2 py-1 font-bold text-red-700">
+                              {item.bloodGroup}
+                            </span>
+                          </td>
+                          <td>{item.component}</td>
+                          <td>{item.units}</td>
+                          <td>
+                            <Status value={item.urgency} />
+                          </td>
+                          <td>
+                            <Status value={item.status} />
+                          </td>
+                          <td>
+                            <Link
+                              className="text-red-700"
+                              href={`/requests/${encodeURIComponent(item.id)}`}
+                            >
+                              Open <ArrowRight className="inline" size={13} />
+                            </Link>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+            {modalId === "new-request" && (
+              <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/35 p-4">
+                <section
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="new-request-title"
+                  className="w-full max-w-lg rounded-2xl bg-white p-5"
+                >
+                  <div className="mb-4 flex justify-between">
+                    <div>
+                      <h2 id="new-request-title" className="font-bold">
+                        Create blood request
+                      </h2>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Patient blood component request
+                      </p>
+                    </div>
+                    <button onClick={() => setModalId("")} aria-label="Close">
+                      ×
+                    </button>
+                  </div>
+                  <form
+                    onSubmit={(e) => {
+                      const result = submit(e, (data) =>
+                        createBloodRequest({
+                          patient: String(data.get("patient")),
+                          age: Number(data.get("age")),
+                          gender: String(data.get("gender")),
+                          uhid: String(data.get("uhid")),
+                          ward: String(data.get("ward")),
+                          bloodGroup: String(
+                            data.get("bloodGroup"),
+                          ) as BloodGroup,
+                          doctor: String(data.get("doctor")),
+                          diagnosis: String(data.get("diagnosis")),
+                          component: String(data.get("component")),
+                          units: Number(data.get("units")),
+                          urgency: String(data.get("urgency")) as
+                            | "routine"
+                            | "urgent"
+                            | "emergency",
+                        }),
+                      );
+                      void result.then((value) => {
+                        if (value) setModalId("");
+                      });
+                    }}
+                    className="grid grid-cols-2 gap-3"
+                  >
+                    <Field label="Patient name">
+                      <Text name="patient" />
+                    </Field>
+                    <Field label="Age">
+                      <Text name="age" type="number" min={0} max={120} />
+                    </Field>
+                    <Field label="UHID">
+                      <Text name="uhid" />
+                    </Field>
+                    <Field label="Ward / bed">
+                      <Text name="ward" placeholder="ICU · Bed 08" />
+                    </Field>
+                    <Field label="Patient blood group">
+                      <Select name="bloodGroup">
+                        {groups.map((group) => (
+                          <option key={group}>{group}</option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Component">
+                      <Select name="component">
+                        {components.map((item) => (
+                          <option key={item}>{item}</option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Units">
+                      <Text
+                        name="units"
+                        type="number"
+                        min={1}
+                        max={10}
+                        defaultValue={1}
+                      />
+                    </Field>
+                    <Field label="Urgency">
+                      <Select name="urgency">
+                        <option value="routine">Routine</option>
+                        <option value="urgent">Urgent</option>
+                        <option value="emergency">Emergency</option>
+                      </Select>
+                    </Field>
+                    <Field label="Doctor">
+                      <Text name="doctor" />
+                    </Field>
+                    <Field label="Diagnosis">
+                      <Text name="diagnosis" />
+                    </Field>
+                    <div className="col-span-2 flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setModalId("")}
+                        className="rounded-lg border px-4 text-xs"
+                      >
+                        Cancel
+                      </button>
+                      <button className={buttonStyle}>Create request</button>
+                    </div>
+                  </form>
+                </section>
+              </div>
+            )}
+          </>
+        )}
+        {section === "camps" && (
+          <div className="grid gap-5 xl:grid-cols-[.8fr_1.2fr]">
+            <Panel title="Schedule a camp">
+              <form
+                onSubmit={(e) =>
+                  submit(e, (data) =>
+                    createBloodCamp({
+                      name: String(data.get("name")),
+                      place: String(data.get("place")),
+                      date: String(data.get("date")),
+                      targetDonors: Number(data.get("target")),
+                    }),
+                  )
+                }
+                className="grid gap-4"
+              >
+                <Field label="Camp name">
+                  <Text name="name" />
+                </Field>
+                <Field label="Venue">
+                  <Text name="place" />
+                </Field>
+                <Field label="Date">
+                  <Text name="date" type="date" />
+                </Field>
+                <Field label="Target donors">
+                  <Text name="target" type="number" min={1} defaultValue={50} />
+                </Field>
+                <button className={buttonStyle}>Schedule camp</button>
+              </form>
+            </Panel>
+            <Panel title="Upcoming & recent camps">
+              <div className="flex flex-col gap-3">
+                {db.camps.map((camp) => (
+                  <div key={camp.id} className="rounded-lg border p-4">
+                    <div className="flex justify-between gap-3">
+                      <div>
+                        <h3 className="text-xs font-bold">{camp.name}</h3>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          {camp.place} · {camp.date}
+                        </p>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-700">
+                        {camp.collectedCount}/{camp.targetDonors}
+                      </span>
+                    </div>
+                    <div className="mt-3 h-1.5 rounded-full bg-slate-100">
+                      <div
+                        className="h-1.5 rounded-full bg-[#b91c1c]"
+                        style={{
+                          width: `${Math.min(100, (camp.collectedCount / camp.targetDonors) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        )}
+        {section === "issues" && (
+          <Panel
+            title="Issued blood components"
+            description="Issue slips and approval traceability"
+          >
+            <Rows
+              rows={db.issues.map((issue) => ({
+                id: issue.id,
+                detail: `${issue.issuedTo} · request ${issue.requestId}`,
+                status: issue.emergency ? "Emergency" : "Issued",
+                date: issue.date.slice(0, 10),
+              }))}
+            />
+          </Panel>
+        )}
+        {section === "discards" && (
+          <Panel
+            title="Discarded units"
+            description="Each discard records a reason and medical officer approval"
+          >
+            <Rows
+              rows={db.discards.map((item) => ({
+                id: item.unitId,
+                detail: `${item.reason} · approved by ${item.approvedBy}`,
+                status: "Discarded",
+                date: item.date.slice(0, 10),
+              }))}
+            />
+          </Panel>
+        )}
+        {section === "reports" && (
+          <Panel
+            title="Report centre"
+            description="Download current workspace registers as CSV"
+          >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {[
+                {
+                  title: "Donor register",
+                  rows: db.donors.map((item) => [
+                    item.donorId,
+                    item.name,
+                    item.phone,
+                    item.bloodGroup,
+                    item.donorType,
+                  ]),
+                },
+                {
+                  title: "Collection register",
+                  rows: db.donations.map((item) => [
+                    item.bagNumber,
+                    item.donorName,
+                    item.date,
+                    item.volumeMl,
+                    item.status,
+                  ]),
+                },
+                {
+                  title: "Stock report",
+                  rows: db.units.map((item) => [
+                    item.id,
+                    item.bloodGroup,
+                    item.component,
+                    item.expiryDate,
+                    item.status,
+                  ]),
+                },
+                {
+                  title: "Issue register",
+                  rows: db.issues.map((item) => [
+                    item.id,
+                    item.requestId,
+                    item.unitId,
+                    item.issuedTo,
+                    item.date,
+                  ]),
+                },
+                {
+                  title: "Discard analysis",
+                  rows: db.discards.map((item) => [
+                    item.id,
+                    item.unitId,
+                    item.reason,
+                    item.approvedBy,
+                    item.date,
+                  ]),
+                },
+                {
+                  title: "Request register",
+                  rows: db.requests.map((item) => [
+                    item.id,
+                    item.patient,
+                    item.ward,
+                    item.bloodGroup,
+                    item.component,
+                    item.units,
+                    item.urgency,
+                    item.status,
+                  ]),
+                },
+              ].map((report) => (
+                <button
+                  key={report.title}
+                  onClick={() => downloadCsv(report.title, report.rows)}
+                  className="flex items-center justify-between rounded-lg border p-4 text-left hover:border-red-200 hover:bg-red-50/30"
+                >
+                  <span>
+                    <strong className="block text-xs">{report.title}</strong>
+                    <small className="mt-1 block text-[10px] text-slate-400">
+                      {report.rows.length} records · CSV export
+                    </small>
+                  </span>
+                  <Download size={16} className="text-red-700" />
+                </button>
+              ))}
+            </div>
+            <button
+              className="mt-5 rounded-lg border px-4 py-2 text-xs"
+              onClick={() => window.print()}
+            >
+              Print report
+            </button>
+          </Panel>
+        )}
+        {section === "audit-log" && (
+          <Panel
+            title="Immutable activity log"
+            description="Append-only history of actions taken in this workspace"
+          >
+            <div className="mb-4 relative max-w-sm">
+              <Search
+                size={15}
+                className="absolute left-3 top-3 text-slate-400"
+              />
+              <input
+                className={`${inputStyle} pl-9`}
+                aria-label="Search audit log"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search user, action, entity"
+              />
+            </div>
+            <Rows
+              rows={db.audit
+                .filter((item) =>
+                  `${item.user} ${item.action} ${item.entity} ${item.entityId}`
+                    .toLowerCase()
+                    .includes(query.toLowerCase()),
+                )
+                .map((item) => ({
+                  id: item.id,
+                  detail: `${item.user} · ${item.entity} ${item.entityId} · ${item.details}`,
+                  status: item.action,
+                  date: item.timestamp.slice(0, 16).replace("T", " "),
+                }))}
+            />
+          </Panel>
+        )}
+        {section === "settings" && (
+          <Panel
+            title="Blood bank policy settings"
+            description="These values apply to donor eligibility and dashboard alerting"
+          >
+            <form
+              onSubmit={(e) =>
+                submit(e, (data) =>
+                  saveSettings({
+                    donationIntervalDays: Number(
+                      data.get("donationIntervalDays"),
+                    ),
+                    expiryAlertDays: Number(data.get("expiryAlertDays")),
+                    lowStockThresholds: Object.fromEntries(
+                      groups.map((group) => [
+                        group,
+                        Number(data.get(`threshold-${group}`)),
+                      ]),
+                    ) as Record<BloodGroup, number>,
+                  }),
+                )
+              }
+              className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            >
+              <Field label="Donation interval (days)">
+                <Text
+                  name="donationIntervalDays"
+                  type="number"
+                  min={1}
+                  defaultValue={settings.donationIntervalDays}
+                />
+              </Field>
+              <Field label="Expiry alert (days)">
+                <Text
+                  name="expiryAlertDays"
+                  type="number"
+                  min={1}
+                  defaultValue={settings.expiryAlertDays}
+                />
+              </Field>
+              {groups.map((group) => (
+                <Field key={group} label={`${group} low stock threshold`}>
+                  <Text
+                    name={`threshold-${group}`}
+                    type="number"
+                    min={0}
+                    defaultValue={settings.lowStockThresholds[group]}
+                  />
+                </Field>
+              ))}
+              <div className="sm:col-span-2 lg:col-span-3">
+                <button className={buttonStyle}>Save policy settings</button>
+              </div>
+            </form>
+          </Panel>
+        )}
+        {!Object.hasOwn(titles, section) && (
+          <Panel title="Module unavailable">
+            <p className="text-sm text-slate-500">
+              This section does not exist. Use the navigation to open an
+              available module.
+            </p>
+          </Panel>
+        )}
+      </main>
+    </AppShell>
+  );
+}
+function Rows({
+  rows,
+}: {
+  rows: { id: string; detail: string; status: string; date: string }[];
+}) {
+  return rows.length ? (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[620px] text-left text-xs">
+        <thead>
+          <tr className="border-b text-[10px] uppercase text-slate-400">
+            <th className="py-3">Reference</th>
+            <th>Details</th>
+            <th>Status</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {rows.map((row) => (
+            <tr key={row.id}>
+              <td className="py-3 font-semibold">{row.id}</td>
+              <td>{row.detail}</td>
+              <td>
+                <Status value={row.status} />
+              </td>
+              <td>{row.date}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <p className="py-8 text-center text-xs text-slate-400">
+      No records yet. New activity will appear here.
+    </p>
+  );
+}
+function downloadCsv(name: string, rows: (string | number)[][]) {
+  const csv = rows
+    .map((row) =>
+      row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(","),
+    )
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${name.toLowerCase().replaceAll(" ", "-")}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}

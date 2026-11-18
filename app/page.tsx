@@ -2,58 +2,125 @@
 
 import { useMemo } from 'react'
 import useSWR from 'swr'
-import { ArrowDownRight, ArrowRight, ArrowUpRight, CalendarDays, ChevronRight, CircleAlert, Clock3, Droplet, MoreHorizontal, Plus, Search, ShieldAlert, Users, FlaskConical, PackageCheck } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { monthlyActivity } from '@/lib/seed'
-import { AppShell } from '@/components/app-shell'
 import Link from 'next/link'
+import { ArrowDownRight, ArrowRight, ArrowUpRight, CircleAlert, Clock3, Droplet, FlaskConical, PackageCheck, ShieldAlert, Users } from 'lucide-react'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { AppShell } from '@/components/app-shell'
 import { getWorkflowData, loadWorkflowData, settings } from '@/lib/db/workflows'
+import { monthlyActivity } from '@/lib/seed'
 import { isFirebaseConfigured } from '@/lib/firebase'
+import type { BloodGroup } from '@/lib/types'
 
-const groups = ['O−','O+','A−','A+','B−','B+','AB−','AB+']
-const stats = [
- {label:'Available units',value:'24',detail:'Across 8 blood groups',icon:PackageCheck,color:'red',trend:'+8.2%',up:true},
- {label:'Expiring soon',value:'06',detail:'Within the next 3 days',icon:Clock3,color:'amber',trend:'2 today',up:false},
- {label:'In quarantine',value:'04',detail:'Awaiting review',icon:ShieldAlert,color:'blue',trend:'All screened',up:true},
- {label:'Pending requests',value:'05',detail:'2 urgent · 1 emergency',icon:ClipboardRequests,color:'purple',trend:'View queue',up:false},
- {label:'Today’s collections',value:'12',detail:'3 camps · 9 walk-ins',icon:Droplet,color:'blue',trend:'+3 vs yesterday',up:true},
- {label:'Today’s issues',value:'09',detail:'11 units issued',icon:PackageCheck,color:'green',trend:'On track',up:true},
-]
-function ClipboardRequests({size=20}:{size?:number}) { return <Users size={size}/> }
-function buildActivity(donations: {date:string}[], issues: {date:string}[]) {
- const now = new Date()
- return Array.from({length:6},(_,index)=>{
-  const date = new Date(now.getFullYear(),now.getMonth()-5+index,1)
-  const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`
-  return {month:date.toLocaleDateString('en-US',{month:'short'}),collections:donations.filter(item=>item.date.startsWith(key)).length,issues:issues.filter(item=>item.date.startsWith(key)).length}
- })
+const groups: BloodGroup[] = ['O-', 'O+', 'A-', 'A+', 'B-', 'B+', 'AB-', 'AB+']
+
+function buildActivity(donations: { date: string }[], issues: { date: string }[]) {
+  const now = new Date()
+  return Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1)
+    const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+    return {
+      month: date.toLocaleDateString('en-US', { month: 'short' }),
+      collections: donations.filter(item => item.date.startsWith(key)).length,
+      issues: issues.filter(item => item.date.startsWith(key)).length,
+    }
+  })
 }
 
 export default function DashboardPage() {
- const {data:loadedData,error:loadError} = useSWR('blood-bank-workflows',loadWorkflowData,{fallbackData:getWorkflowData()})
- const data = loadedData ?? getWorkflowData()
- const counts = useMemo(() => {
-  const today = new Date().toISOString().slice(0,10)
-  return {
-   available:data.units.filter(unit=>unit.status==='available').length,
-   expiring:data.units.filter(unit=>unit.status==='available'&&unit.expiryDate>=today&&unit.expiryDate<=new Date(Date.now()+settings.expiryAlertDays*86400000).toISOString().slice(0,10)).length,
-   quarantine:data.units.filter(unit=>unit.status==='quarantine').length,
-   pending:data.requests.filter(request=>!['Issued','Cancelled'].includes(request.status)).length,
-   collections:data.donations.filter(donation=>donation.date===today).length,
-   issues:data.issues.filter(issue=>issue.date.slice(0,10)===today).length,
-  }
- },[data.units,data.requests,data.donations,data.issues])
- const groupCounts = useMemo(()=>Object.fromEntries(groups.map(group=>[group,data.units.filter(unit=>unit.status==='available'&&unit.bloodGroup===group.replace('−','-')).length])),[data.units])
- const activity = useMemo(()=>isFirebaseConfigured?buildActivity(data.donations,data.issues):monthlyActivity,[data.donations,data.issues])
- return <AppShell><main className="mx-auto max-w-[1500px] px-5 py-7 md:px-8 md:py-9">
-  <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.15em] text-[#b91c1c]"><span className="size-1.5 rounded-full bg-[#b91c1c]"/> Tuesday, November 18, 2026</p><h1 className="text-[27px] font-bold tracking-[-.04em] text-[#182431] sm:text-[31px]">Blood bank overview</h1><p className="mt-1 text-sm text-slate-500">Here&apos;s what&apos;s happening across your blood bank today.</p></div><Link href="/requests?new=1" className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-lg bg-[#b91c1c] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#991b1b] sm:self-auto"><Plus size={16}/> New blood request</Link></div>
-  {loadError&&<div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">Unable to load the live Firestore dashboard. Confirm your staff account is active and Firestore rules are published.</div>}
-  <section aria-label="Key metrics" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{stats.map((stat,index)=>{const Icon=stat.icon; const values=[counts.available,counts.expiring,counts.quarantine,counts.pending,counts.collections,counts.issues]; return <article key={stat.label} className="rounded-xl border border-[#e9edf1] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,.025)]"><div className="flex items-start justify-between"><div className={`grid size-10 place-items-center rounded-xl ${['bg-red-50 text-[#b91c1c]','bg-amber-50 text-amber-700','bg-blue-50 text-blue-700','bg-violet-50 text-violet-700','bg-sky-50 text-sky-700','bg-emerald-50 text-emerald-700'][index]}`} ><Icon size={19}/></div><button aria-label={`More about ${stat.label}`} className="text-slate-300 hover:text-slate-600"><MoreHorizontal size={18}/></button></div><div className="mt-4 flex items-end justify-between"><div><p className="text-[13px] font-medium text-slate-500">{stat.label}</p><p className="mt-1 text-[29px] font-bold tracking-tight text-[#1b2836]">{values[index]}</p></div><span className={`mb-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-semibold ${index===1?'bg-amber-50 text-amber-700':'bg-emerald-50 text-emerald-700'}`}>{stat.up?<ArrowUpRight size={12}/>:<ArrowDownRight size={12}/>} {stat.trend}</span></div><p className="mt-1 text-[11px] text-slate-400">{stat.detail}</p></article>})}</section>
-  <section className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr_1fr]"><article className="rounded-xl border border-[#e9edf1] bg-white p-5 md:p-6"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-bold text-[#202c39]">Collection &amp; issue activity</h2><p className="mt-1 text-xs text-slate-400">Monthly units · June — November 2026</p></div><button className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-medium text-slate-600"><CalendarDays size={14}/> Last 6 months <ChevronRight size={13}/></button></div><div className="mt-5 h-[235px] w-full"><ResponsiveContainer width="100%" height="100%"><AreaChart data={activity} margin={{top:8,right:6,left:-22,bottom:0}}><defs><linearGradient id="collectionFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#c53333" stopOpacity={0.13}/><stop offset="95%" stopColor="#c53333" stopOpacity={0}/></linearGradient></defs><CartesianGrid vertical={false} stroke="#edf0f3" strokeDasharray="3 5"/><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize:11,fill:'#94a0ae'}} dy={9}/><YAxis axisLine={false} tickLine={false} tick={{fontSize:10,fill:'#94a0ae'}}/><Tooltip contentStyle={{border:'1px solid #edf0f3',borderRadius:10,fontSize:12,boxShadow:'0 8px 24px rgba(15,23,42,.08)'}}/><Area type="monotone" dataKey="collections" name="Collections" stroke="#b91c1c" strokeWidth={2.3} fill="url(#collectionFill)"/><Area type="monotone" dataKey="issues" name="Issues" stroke="#9aa7b5" strokeWidth={2} strokeDasharray="4 4" fill="transparent"/></AreaChart></ResponsiveContainer></div><div className="mt-1 flex items-center gap-5 text-[11px] text-slate-500"><span className="flex items-center gap-2"><span className="h-0.5 w-4 rounded bg-[#b91c1c]"/> Collections</span><span className="flex items-center gap-2"><span className="h-0.5 w-4 rounded bg-slate-400"/> Issues</span><span className="ml-auto font-semibold text-slate-600">164 <span className="font-normal text-slate-400">collected this month</span></span></div></article>
-  <article className="rounded-xl border border-[#e9edf1] bg-white p-5 md:p-6"><div className="flex items-start justify-between"><div><h2 className="text-sm font-bold text-[#202c39]">Stock by blood group</h2><p className="mt-1 text-xs text-slate-400">Available units · all components</p></div><Link href="/inventory" className="text-xs font-semibold text-[#b91c1c]">View inventory <ArrowRight className="ml-1 inline" size={13}/></Link></div><div className="mt-5 grid grid-cols-2 gap-2.5">{groups.map(group=>{const count=groupCounts[group]; const low=count<=2; return <div key={group} className={`flex items-center justify-between rounded-lg border px-3 py-2.5 ${low?'border-amber-200 bg-amber-50/65':'border-[#edf0f3] bg-[#fbfcfd]'}`}><span className={`inline-flex min-w-[39px] justify-center rounded-md px-2 py-1 text-xs font-bold ${group.includes('−')?'bg-slate-100 text-slate-700':'bg-red-100 text-[#a91b1b]'}`}>{group.replace('−','-')}</span><span className="text-sm font-bold text-slate-700">{count}<span className="ml-1 text-[10px] font-normal text-slate-400">units</span></span></div>})}</div><div className="mt-4 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-[11px] text-amber-800"><CircleAlert size={15}/><span><strong>2 blood groups</strong> are below their stock threshold</span></div></article></section>
-  <section className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr_1fr]"><article className="rounded-xl border border-[#e9edf1] bg-white"><div className="flex items-center justify-between border-b border-[#edf0f3] px-5 py-4 md:px-6"><div><h2 className="text-sm font-bold text-[#202c39]">Priority requests</h2><p className="mt-1 text-xs text-slate-400">Requests requiring your attention</p></div><a href="/requests" className="text-xs font-semibold text-[#b91c1c]">See all <ArrowRight className="ml-1 inline" size={13}/></a></div><div className="divide-y divide-[#f0f2f4]">{[...data.requests].sort((a,b)=>['emergency','urgent','routine'].indexOf(a.urgency)-['emergency','urgent','routine'].indexOf(b.urgency)).slice(0,3).map(request=><div key={request.id} className="flex items-center gap-3 px-5 py-3.5 md:px-6"><div className={`grid size-9 shrink-0 place-items-center rounded-lg text-[11px] font-bold ${request.urgency==='emergency'?'bg-red-100 text-[#b91c1c]':'bg-slate-100 text-slate-700'}`}>{request.bloodGroup}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-xs font-semibold text-slate-800">{request.patient}</p>{request.urgency==='emergency'&&<span className="rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-red-700">Emergency</span>}</div><p className="mt-1 truncate text-[10px] text-slate-400">{request.id} · {request.component} · {request.units} units · {request.ward}</p></div><span className={`hidden rounded-full px-2.5 py-1 text-[10px] font-semibold sm:block ${request.status==='Ready'?'bg-emerald-50 text-emerald-700':'bg-slate-100 text-slate-600'}`}>{request.status}</span><ChevronRight size={15} className="text-slate-300"/></div>)}</div></article>
-  <article className="rounded-xl border border-[#e9edf1] bg-white"><div className="flex items-center justify-between border-b border-[#edf0f3] px-5 py-4 md:px-6"><div><h2 className="text-sm font-bold text-[#202c39]">Attention needed</h2><p className="mt-1 text-xs text-slate-400">Important blood bank alerts</p></div><span className="grid size-7 place-items-center rounded-full bg-red-50 text-[11px] font-bold text-[#b91c1c]">3</span></div><div className="flex flex-col gap-3 p-5 md:px-6"><div className="flex gap-3 rounded-lg border border-amber-100 bg-amber-50/60 p-3"><div className="mt-0.5 text-amber-700"><Clock3 size={16}/></div><div><p className="text-xs font-semibold text-slate-800">Units expiring soon</p><p className="mt-1 text-[10px] leading-4 text-slate-500">6 units expire within the next 3 days. Review inventory.</p><a href="/inventory" className="mt-2 inline-block text-[10px] font-semibold text-amber-800">Review units <ArrowRight className="ml-1 inline" size={12}/></a></div></div><div className="flex gap-3 rounded-lg border border-red-100 bg-red-50/55 p-3"><div className="mt-0.5 text-[#b91c1c]"><CircleAlert size={16}/></div><div><p className="text-xs font-semibold text-slate-800">Emergency request · ICU</p><p className="mt-1 text-[10px] leading-4 text-slate-500">REQ-2026-041 needs 2 units of O− PRBC.</p><a href="/requests" className="mt-2 inline-block text-[10px] font-semibold text-[#b91c1c]">Open request <ArrowRight className="ml-1 inline" size={12}/></a></div></div><div className="flex gap-3 rounded-lg border border-blue-100 bg-blue-50/55 p-3"><div className="mt-0.5 text-blue-700"><FlaskConical size={16}/></div><div><p className="text-xs font-semibold text-slate-800">Screening results pending</p><p className="mt-1 text-[10px] leading-4 text-slate-500">4 donations are in quarantine or awaiting test review.</p><a href="/testing" className="mt-2 inline-block text-[10px] font-semibold text-blue-800">Go to testing <ArrowRight className="ml-1 inline" size={12}/></a></div></div></div></article></section>
-  <p className="mt-6 flex items-center gap-1.5 text-[10px] text-slate-400"><ActivityMark/> Live operational snapshot <span className="text-slate-300">·</span> Updated just now</p>
- </main></AppShell>
+  const { data: loadedData, error: loadError } = useSWR('blood-bank-workflows', loadWorkflowData, {
+    fallbackData: getWorkflowData(),
+    refreshInterval: 15000,
+    revalidateOnFocus: true,
+  })
+  const data = loadedData ?? getWorkflowData()
+  const today = new Date().toISOString().slice(0, 10)
+  const expiryLimit = new Date(Date.now() + settings.expiryAlertDays * 86400000).toISOString().slice(0, 10)
+  const groupCounts = useMemo(() => Object.fromEntries(groups.map(group => [
+    group,
+    data.units.filter(unit => unit.status === 'available' && unit.bloodGroup === group).length,
+  ])) as Record<BloodGroup, number>, [data.units])
+  const lowStockGroups = groups.filter(group => groupCounts[group] < settings.lowStockThresholds[group])
+  const counts = useMemo(() => ({
+    available: data.units.filter(unit => unit.status === 'available' && unit.expiryDate >= today).length,
+    expiring: data.units.filter(unit => unit.status === 'available' && unit.expiryDate >= today && unit.expiryDate <= expiryLimit).length,
+    expired: data.units.filter(unit => unit.status === 'expired' || (unit.expiryDate < today && !['issued', 'discarded'].includes(unit.status))).length,
+    quarantine: data.units.filter(unit => unit.status === 'quarantine').length,
+    pending: data.requests.filter(request => !['Issued', 'Cancelled'].includes(request.status)).length,
+    collections: data.donations.filter(donation => donation.date === today).length,
+    issues: data.issues.filter(issue => issue.date.slice(0, 10) === today).length,
+    screening: data.donations.filter(donation => ['testing', 'quarantine'].includes(donation.status)).length,
+  }), [data.units, data.requests, data.donations, data.issues, today, expiryLimit])
+  const priorityRequests = useMemo(() => [...data.requests]
+    .filter(request => !['Issued', 'Cancelled'].includes(request.status))
+    .sort((a, b) => ['emergency', 'urgent', 'routine'].indexOf(a.urgency) - ['emergency', 'urgent', 'routine'].indexOf(b.urgency)), [data.requests])
+  const activity = useMemo(() => isFirebaseConfigured ? buildActivity(data.donations, data.issues) : monthlyActivity, [data.donations, data.issues])
+  const thisMonth = today.slice(0, 7)
+  const collectedThisMonth = data.donations.filter(donation => donation.date.startsWith(thisMonth)).length
+  const urgentCount = priorityRequests.filter(request => request.urgency === 'urgent').length
+  const emergencyCount = priorityRequests.filter(request => request.urgency === 'emergency').length
+  const attentionAlerts = [
+    ...(counts.expired > 0 ? [{ title: 'Expired units', detail: `${counts.expired} units are past their expiry date and cannot be issued.`, href: '/inventory', tone: 'red' }] : []),
+    ...(counts.expiring > 0 ? [{ title: 'Units expiring soon', detail: `${counts.expiring} units expire within ${settings.expiryAlertDays} days.`, href: '/inventory', tone: 'amber' }] : []),
+    ...(lowStockGroups.length > 0 ? [{ title: 'Low blood stock', detail: lowStockGroups.map(group => `${group}: ${groupCounts[group]}/${settings.lowStockThresholds[group]}`).join(' · '), href: '/inventory', tone: 'red' }] : []),
+    ...(priorityRequests.length > 0 ? [{ title: `${priorityRequests[0].urgency} request · ${priorityRequests[0].ward}`, detail: `${priorityRequests[0].patient} needs ${priorityRequests[0].units} ${priorityRequests[0].component} unit(s) · ${priorityRequests[0].status}.`, href: `/requests/${encodeURIComponent(priorityRequests[0].id)}`, tone: 'red' }] : []),
+    ...(counts.screening > 0 ? [{ title: 'Screening results pending', detail: `${counts.screening} donations are in testing or quarantine.`, href: '/testing', tone: 'blue' }] : []),
+  ]
+  const metricCards = [
+    { label: 'Available units', value: counts.available, detail: 'Unexpired units across all groups', icon: PackageCheck, tone: 'red', badge: 'Current stock' },
+    { label: 'Expiring soon', value: counts.expiring, detail: `Within ${settings.expiryAlertDays} days`, icon: Clock3, tone: 'amber', badge: 'Review inventory' },
+    { label: 'Expired units', value: counts.expired, detail: 'Unavailable for issue', icon: CircleAlert, tone: 'red', badge: 'Past expiry' },
+    { label: 'In quarantine', value: counts.quarantine, detail: 'Awaiting review', icon: ShieldAlert, tone: 'blue', badge: 'Restricted stock' },
+    { label: 'Pending requests', value: counts.pending, detail: `${emergencyCount} emergency · ${urgentCount} urgent`, icon: Users, tone: 'purple', badge: 'Open queue' },
+    { label: 'Low-stock groups', value: lowStockGroups.length, detail: 'Below configured thresholds', icon: Droplet, tone: 'amber', badge: 'Replenishment needed' },
+    { label: 'Today’s collections', value: counts.collections, detail: 'Donations recorded today', icon: Droplet, tone: 'blue', badge: 'Today' },
+    { label: 'Today’s issues', value: counts.issues, detail: 'Units issued today', icon: PackageCheck, tone: 'green', badge: 'Today' },
+  ]
+
+  return <AppShell><main className="mx-auto max-w-[1500px] px-5 py-7 md:px-8 md:py-9">
+    <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+      <div>
+        <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[.15em] text-[#b91c1c]"><span className="size-1.5 rounded-full bg-[#b91c1c]"/>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+        <h1 className="text-[27px] font-bold tracking-[-.04em] text-[#182431] sm:text-[31px]">Blood bank overview</h1>
+        <p className="mt-1 text-sm text-slate-500">Live operational status across your blood bank.</p>
+      </div>
+      <Link href="/requests?new=1" className="inline-flex h-10 items-center justify-center gap-2 self-start rounded-lg bg-[#b91c1c] px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-[#991b1b] sm:self-auto"><span>+</span> New blood request</Link>
+    </div>
+    {loadError && <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800">Unable to load the live Firestore dashboard. Confirm your staff account is active and the latest Firestore rules are published.</div>}
+    <section aria-label="Key metrics" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {metricCards.map(({ label, value, detail, icon: Icon, tone, badge }) => <article key={label} className="rounded-xl border border-[#e9edf1] bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,.025)]">
+        <div className="flex items-start justify-between"><div className={`grid size-10 place-items-center rounded-xl ${tone === 'red' ? 'bg-red-50 text-[#b91c1c]' : tone === 'amber' ? 'bg-amber-50 text-amber-700' : tone === 'blue' ? 'bg-blue-50 text-blue-700' : tone === 'purple' ? 'bg-violet-50 text-violet-700' : 'bg-emerald-50 text-emerald-700'}`}><Icon size={19}/></div><span className="text-[10px] font-semibold text-slate-400">{badge}</span></div>
+        <div className="mt-4"><p className="text-[13px] font-medium text-slate-500">{label}</p><p className="mt-1 text-[29px] font-bold tracking-tight text-[#1b2836]">{value}</p><p className="mt-1 text-[11px] text-slate-400">{detail}</p></div>
+      </article>)}
+    </section>
+    <section className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr_1fr]">
+      <article className="rounded-xl border border-[#e9edf1] bg-white p-5 md:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-bold text-[#202c39]">Collection &amp; issue activity</h2><p className="mt-1 text-xs text-slate-400">Monthly records · {activity[0]?.month} — {activity[activity.length - 1]?.month}</p></div></div>
+        <div className="mt-5 h-[235px] w-full"><ResponsiveContainer width="100%" height="100%"><AreaChart data={activity} margin={{ top: 8, right: 6, left: -22, bottom: 0 }}><defs><linearGradient id="collectionFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#c53333" stopOpacity={0.13}/><stop offset="95%" stopColor="#c53333" stopOpacity={0}/></linearGradient></defs><CartesianGrid vertical={false} stroke="#edf0f3" strokeDasharray="3 5"/><XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#94a0ae' }} dy={9}/><YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a0ae' }}/><Tooltip contentStyle={{ border: '1px solid #edf0f3', borderRadius: 10, fontSize: 12, boxShadow: '0 8px 24px rgba(15,23,42,.08)' }}/><Area type="monotone" dataKey="collections" name="Collections" stroke="#b91c1c" strokeWidth={2.3} fill="url(#collectionFill)"/><Area type="monotone" dataKey="issues" name="Issues" stroke="#9aa7b5" strokeWidth={2} strokeDasharray="4 4" fill="transparent"/></AreaChart></ResponsiveContainer></div>
+        <div className="mt-1 flex items-center gap-5 text-[11px] text-slate-500"><span className="flex items-center gap-2"><span className="h-0.5 w-4 rounded bg-[#b91c1c]"/> Collections</span><span className="flex items-center gap-2"><span className="h-0.5 w-4 rounded bg-slate-400"/> Issues</span><span className="ml-auto font-semibold text-slate-600">{collectedThisMonth} <span className="font-normal text-slate-400">collected this month</span></span></div>
+      </article>
+      <article className="rounded-xl border border-[#e9edf1] bg-white p-5 md:p-6">
+        <div className="flex items-start justify-between"><div><h2 className="text-sm font-bold text-[#202c39]">Stock by blood group</h2><p className="mt-1 text-xs text-slate-400">Unexpired available units · all components</p></div><Link href="/inventory" className="text-xs font-semibold text-[#b91c1c]">View inventory <ArrowRight className="ml-1 inline" size={13}/></Link></div>
+        <div className="mt-5 grid grid-cols-2 gap-2.5">{groups.map(group => {
+          const count = groupCounts[group]
+          const threshold = settings.lowStockThresholds[group]
+          const low = count < threshold
+          return <div key={group} className={`flex items-center justify-between rounded-lg border px-3 py-2.5 ${low ? 'border-amber-200 bg-amber-50/65' : 'border-[#edf0f3] bg-[#fbfcfd]'}`}><span className={`inline-flex min-w-[39px] justify-center rounded-md px-2 py-1 text-xs font-bold ${group.endsWith('-') ? 'bg-slate-100 text-slate-700' : 'bg-red-100 text-[#a91b1b]'}`}>{group}</span><span className="text-sm font-bold text-slate-700">{count}<span className="ml-1 text-[10px] font-normal text-slate-400">units</span></span></div>
+        })}</div>
+        <p className="mt-4 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2.5 text-[11px] text-amber-800"><CircleAlert size={15}/><span><strong>{lowStockGroups.length} blood groups</strong> below configured stock thresholds</span></p>
+      </article>
+    </section>
+    <section className="mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.55fr_1fr]">
+      <article className="rounded-xl border border-[#e9edf1] bg-white">
+        <div className="flex items-center justify-between border-b border-[#edf0f3] px-5 py-4 md:px-6"><div><h2 className="text-sm font-bold text-[#202c39]">Priority requests</h2><p className="mt-1 text-xs text-slate-400">Open requests sorted by urgency</p></div><Link href="/requests" className="text-xs font-semibold text-[#b91c1c]">See all <ArrowRight className="ml-1 inline" size={13}/></Link></div>
+        {priorityRequests.length ? <div className="divide-y divide-[#f0f2f4]">{priorityRequests.slice(0, 5).map(request => <Link key={request.id} href={`/requests/${encodeURIComponent(request.id)}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-slate-50 md:px-6"><div className={`grid size-9 shrink-0 place-items-center rounded-lg text-[11px] font-bold ${request.urgency === 'emergency' ? 'bg-red-100 text-[#b91c1c]' : 'bg-slate-100 text-slate-700'}`}>{request.bloodGroup}</div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-xs font-semibold text-slate-800">{request.patient}</p><span className="text-[9px] font-bold uppercase tracking-wide text-slate-500">{request.urgency}</span></div><p className="mt-1 truncate text-[10px] text-slate-400">{request.id} · {request.component} · {request.units} units · {request.ward}</p></div><span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-600">{request.status}</span></Link>)}</div>
+          : <p className="p-8 text-center text-xs text-slate-400">No open requests.</p>}
+      </article>
+      <article className="rounded-xl border border-[#e9edf1] bg-white">
+        <div className="flex items-center justify-between border-b border-[#edf0f3] px-5 py-4 md:px-6"><div><h2 className="text-sm font-bold text-[#202c39]">Attention needed</h2><p className="mt-1 text-xs text-slate-400">Alerts from current inventory and workflow</p></div><span className="grid size-7 place-items-center rounded-full bg-red-50 text-[11px] font-bold text-[#b91c1c]">{attentionAlerts.length}</span></div>
+        {attentionAlerts.length ? <div className="flex flex-col gap-3 p-5 md:px-6">{attentionAlerts.map(alert => <Link key={alert.title} href={alert.href} className={`flex gap-3 rounded-lg border p-3 ${alert.tone === 'red' ? 'border-red-100 bg-red-50/55' : alert.tone === 'amber' ? 'border-amber-100 bg-amber-50/60' : 'border-blue-100 bg-blue-50/55'}`}><div className={`mt-0.5 ${alert.tone === 'red' ? 'text-[#b91c1c]' : alert.tone === 'amber' ? 'text-amber-700' : 'text-blue-700'}`}>{alert.tone === 'blue' ? <FlaskConical size={16}/> : alert.tone === 'amber' ? <Clock3 size={16}/> : <CircleAlert size={16}/>}</div><div><p className="text-xs font-semibold text-slate-800">{alert.title}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{alert.detail}</p><span className="mt-2 inline-block text-[10px] font-semibold text-slate-600">Review <ArrowRight className="ml-1 inline" size={12}/></span></div></Link>)}</div>
+          : <p className="p-8 text-center text-xs text-slate-400">No current alerts.</p>}
+      </article>
+    </section>
+    <p className="mt-6 flex items-center gap-1.5 text-[10px] text-slate-400"><span className="inline-block size-1.5 rounded-full bg-emerald-500"/> Live Firestore data · Refreshes automatically every 15 seconds</p>
+  </main></AppShell>
 }
-function ActivityMark(){return <span className="inline-block size-1.5 rounded-full bg-emerald-500"/>}
