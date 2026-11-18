@@ -1,0 +1,132 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function userDoc() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function activeUser() { return signedIn() && userDoc().active == true; }
+    function role() { return userDoc().role; }
+    function hasRole(roles) { return activeUser() && role() in roles; }
+    function canManage() { return hasRole(['admin']); }
+    function bloodGroupConfirmed(donationRef) {
+      return exists(/databases/$(database)/documents/tests/$(donationRef))
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.abo in ['A', 'B', 'AB', 'O']
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.rh in ['positive', 'negative'];
+    }
+    function allInfectionTestsNegative(donationRef) {
+      return exists(/databases/$(database)/documents/tests/$(donationRef))
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.hiv == 'negative'
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.hbsag == 'negative'
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.hcv == 'negative'
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.syphilis == 'negative'
+        && get(/databases/$(database)/documents/tests/$(donationRef)).data.malaria == 'negative';
+    }
+    function hasReactiveTest(donationRef) {
+      return exists(/databases/$(database)/documents/tests/$(donationRef))
+        && (get(/databases/$(database)/documents/tests/$(donationRef)).data.hiv == 'reactive'
+          || get(/databases/$(database)/documents/tests/$(donationRef)).data.hbsag == 'reactive'
+          || get(/databases/$(database)/documents/tests/$(donationRef)).data.hcv == 'reactive'
+          || get(/databases/$(database)/documents/tests/$(donationRef)).data.syphilis == 'reactive'
+          || get(/databases/$(database)/documents/tests/$(donationRef)).data.malaria == 'reactive');
+    }
+    function validEmergencyQuickIssue() {
+      let requestId = request.resource.data.emergencyRequestId;
+      return request.resource.data.keys().hasAll(['emergencyRequestId', 'emergencyApprovedBy'])
+        && request.resource.data.emergencyApprovedBy is string
+        && request.resource.data.emergencyApprovedBy.size() > 0
+        && resource.data.status == 'available'
+        && resource.data.bloodGroup == 'O-'
+        && resource.data.expiryDate is timestamp
+        && resource.data.expiryDate > request.time
+        && !hasReactiveTest(resource.data.donationRef)
+        && allInfectionTestsNegative(resource.data.donationRef)
+        && bloodGroupConfirmed(resource.data.donationRef)
+        && exists(/databases/$(database)/documents/requests/$(requestId))
+        && get(/databases/$(database)/documents/requests/$(requestId)).data.urgency == 'emergency'
+        && hasRole(['admin', 'medical_officer']);
+    }
+    function validStatusTransition() {
+      let oldStatus = resource.data.status;
+      let newStatus = request.resource.data.status;
+      let allowed = (oldStatus == 'collected' && newStatus == 'testing')
+        || (oldStatus == 'testing' && (newStatus == 'quarantine' || newStatus == 'available'))
+        || (oldStatus == 'available' && (newStatus == 'reserved' || newStatus == 'issued'))
+        || (oldStatus == 'reserved' && newStatus == 'issued')
+        || (newStatus == 'expired' && oldStatus in ['collected', 'testing', 'quarantine', 'available', 'reserved'])
+        || (newStatus == 'discarded' && oldStatus in ['collected', 'testing', 'quarantine', 'available', 'reserved']);
+      let hasReactive = hasReactiveTest(resource.data.donationRef);
+      let passesScreening = allInfectionTestsNegative(resource.data.donationRef) && bloodGroupConfirmed(resource.data.donationRef);
+      let validExpiry = resource.data.expiryDate is timestamp && resource.data.expiryDate > request.time;
+      return allowed
+        && (newStatus != 'available' || passesScreening)
+        && (newStatus != 'reserved' || (!hasReactive && passesScreening && validExpiry))
+        && (newStatus != 'issued' || (!hasReactive && passesScreening && validExpiry || validEmergencyQuickIssue()));
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create, update, delete: if canManage();
+    }
+    match /donors/{id} {
+      allow read: if activeUser();
+      allow create, update: if hasRole(['admin', 'nurse_phlebotomist', 'receptionist']);
+      allow delete: if canManage();
+    }
+    match /donations/{id} {
+      allow read: if activeUser();
+      allow create: if hasRole(['admin', 'nurse_phlebotomist']);
+      allow update: if hasRole(['admin', 'lab_tech', 'medical_officer']);
+      allow delete: if canManage();
+    }
+    match /tests/{id} {
+      allow read: if activeUser();
+      allow create, update: if hasRole(['admin', 'lab_tech']);
+      allow delete: if canManage();
+    }
+    match /units/{id} {
+      allow read: if activeUser();
+      allow create: if hasRole(['admin', 'lab_tech']) && request.resource.data.status == 'testing';
+      allow update: if hasRole(['admin', 'lab_tech', 'medical_officer']) && validStatusTransition();
+      allow delete: if canManage();
+    }
+    match /requests/{id} {
+      allow read: if activeUser();
+      allow create: if hasRole(['admin', 'receptionist', 'medical_officer']);
+      allow update: if hasRole(['admin', 'lab_tech', 'medical_officer']);
+      allow delete: if canManage();
+    }
+    match /crossmatches/{id} {
+      allow read: if activeUser();
+      allow create: if hasRole(['admin', 'lab_tech']);
+      allow update, delete: if canManage();
+    }
+    match /issues/{id} {
+      allow read: if activeUser();
+      allow create: if hasRole(['admin', 'medical_officer']);
+      allow update, delete: if canManage();
+    }
+    match /discards/{id} {
+      allow read: if activeUser();
+      allow create: if hasRole(['admin', 'medical_officer']);
+      allow update, delete: if canManage();
+    }
+    match /camps/{id} {
+      allow read: if activeUser();
+      allow create, update: if hasRole(['admin', 'receptionist', 'nurse_phlebotomist']);
+      allow delete: if canManage();
+    }
+    match /storageUnits/{id} {
+      allow read: if activeUser();
+      allow create, update: if hasRole(['admin', 'lab_tech']);
+      allow delete: if canManage();
+    }
+    match /auditLogs/{id} {
+      allow read: if activeUser();
+      allow create: if activeUser() && request.resource.data.user == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /settings/{id} {
+      allow read: if activeUser();
+      allow create, update, delete: if canManage();
+    }
+  }
+}
