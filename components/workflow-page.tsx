@@ -12,12 +12,16 @@ import {
   Search,
   ShieldAlert,
   Trash2,
+  Pencil,
+  X,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import {
   createBloodCamp,
   createBloodRequest,
   createCollection,
+  updateCollection,
+  deleteCollection,
   discardBloodUnit,
   donationEligibility,
   getWorkflowData,
@@ -27,6 +31,7 @@ import {
   saveSettings,
   settings,
   type Infection,
+  type Donation,
 } from "@/lib/db/workflows";
 import type { BloodGroup } from "@/lib/types";
 
@@ -187,6 +192,12 @@ export function WorkflowPage({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
+  const [editingCollection, setEditingCollection] = useState<Donation | null>(
+    null,
+  );
+  const [deletingCollectionId, setDeletingCollectionId] = useState<string | null>(
+    null,
+  );
   const [modalId, setModalId] = useState(
     initialNewRequest ? "new-request" : "",
   );
@@ -224,6 +235,48 @@ export function WorkflowPage({
     if (result) form.reset();
     return result;
   };
+  async function handleUpdateCollection(formData: FormData) {
+    if (!editingCollection) return;
+    setError("");
+    setNotice("");
+    try {
+      await updateCollection(editingCollection.id, {
+        hb: Number(formData.get("hb")),
+        weight: Number(formData.get("weight")),
+        bp: String(formData.get("bp")),
+        pulse: Number(formData.get("pulse")),
+        temp: Number(formData.get("temp")),
+        status: String(formData.get("status")) as
+          "testing" | "quarantine" | "available",
+      });
+      await mutate();
+      setEditingCollection(null);
+      setNotice("Collection updated.");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to update collection.",
+      );
+    }
+  }
+  async function handleDeleteCollection() {
+    if (!deletingCollectionId) return;
+    setError("");
+    setNotice("");
+    try {
+      await deleteCollection(deletingCollectionId);
+      await mutate();
+      setDeletingCollectionId(null);
+      setNotice("Collection deleted.");
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to delete collection.",
+      );
+    }
+  }
   const filteredUnits = useMemo(
     () =>
       db.units.filter(
@@ -471,6 +524,7 @@ export function WorkflowPage({
                       <th>Date</th>
                       <th>Volume</th>
                       <th>Status</th>
+                      <th className="w-[140px]">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -485,12 +539,200 @@ export function WorkflowPage({
                         <td>
                           <Status value={item.status} />
                         </td>
+                        <td>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setEditingCollection(item)}
+                              aria-label={`Edit collection ${item.bagNumber}`}
+                              className="rounded p-1 text-[#b91c1c] hover:bg-red-50"
+                              title="Edit collection"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => setDeletingCollectionId(item.id)}
+                              aria-label={`Delete collection ${item.bagNumber}`}
+                              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-700"
+                              title="Delete collection"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             </Panel>
+          </div>
+        )}
+        {editingCollection && (
+          <div
+            role="presentation"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setEditingCollection(null);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-collection-title"
+              className="w-full max-w-[520px] rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="flex items-start justify-between border-b border-slate-100 p-5">
+                <div>
+                  <h2 id="edit-collection-title" className="text-base font-bold text-slate-900">
+                    Edit collection
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Update screening details for bag {editingCollection.bagNumber}.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEditingCollection(null)}
+                  aria-label="Close"
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleUpdateCollection(
+                    new FormData(event.currentTarget),
+                  );
+                }}
+                className="p-5 grid gap-3 sm:grid-cols-2"
+              >
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                  Bag number
+                  <input
+                    defaultValue={editingCollection.bagNumber}
+                    readOnly
+                    className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-normal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                  Hemoglobin (g/dL)
+                  <input
+                    name="hb"
+                    type="number"
+                    step="0.1"
+                    min={1}
+                    max={30}
+                    defaultValue={editingCollection.screening.hb}
+                    className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                  Weight (kg)
+                  <input
+                    name="weight"
+                    type="number"
+                    step="0.1"
+                    min={1}
+                    max={300}
+                    defaultValue={editingCollection.screening.weight}
+                    className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                  Blood pressure
+                  <input
+                    name="bp"
+                    defaultValue={editingCollection.screening.bp}
+                    placeholder="120/80"
+                    className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                  Pulse (bpm)
+                  <input
+                    name="pulse"
+                    type="number"
+                    min={30}
+                    max={180}
+                    defaultValue={editingCollection.screening.pulse}
+                    className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                  Temperature (°C)
+                  <input
+                    name="temp"
+                    type="number"
+                    step="0.1"
+                    min={34}
+                    max={42}
+                    defaultValue={editingCollection.screening.temp}
+                    className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal"
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600 sm:col-span-2">
+                  Status
+                  <select
+                    name="status"
+                    className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-normal"
+                  >
+                    <option value="testing">Testing</option>
+                    <option value="quarantine">Quarantine</option>
+                    <option value="available">Available</option>
+                  </select>
+                </label>
+                <div className="sm:col-span-2 flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCollection(null)}
+                    className="rounded-lg border px-4 text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button className={buttonStyle}>Save changes</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+        {deletingCollectionId && (
+          <div
+            role="presentation"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setDeletingCollectionId(null);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-collection-title"
+              className="w-full max-w-[360px] rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="border-b border-slate-100 p-5">
+                <h2 id="delete-collection-title" className="text-base font-bold text-slate-900">
+                  Delete collection?
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  This will remove the bag record and cannot be undone.
+                </p>
+              </div>
+              <div className="p-5 flex justify-end gap-2">
+                <button
+                  onClick={() => setDeletingCollectionId(null)}
+                  className="rounded-lg border px-4 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDeleteCollection}
+                  className={buttonStyle}
+                >
+                  Delete collection
+                </button>
+              </div>
+            </div>
           </div>
         )}
         {section === "testing" && (
@@ -615,7 +857,12 @@ export function WorkflowPage({
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search unit, blood group, component"
                 />
-                <Select name="status" defaultValue={filter}>
+                <select
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  aria-label="Filter by status"
+                  className="h-10 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] text-slate-600 outline-none"
+                >
                   <option value="all">All statuses</option>
                   {[
                     "available",
@@ -630,21 +877,7 @@ export function WorkflowPage({
                       {item}
                     </option>
                   ))}
-                </Select>
-                <button
-                  className="h-10 rounded-lg border px-3 text-xs"
-                  onClick={() =>
-                    setFilter(
-                      (
-                        document.querySelector(
-                          "select[name=status]",
-                        ) as HTMLSelectElement
-                      )?.value || "all",
-                    )
-                  }
-                >
-                  Apply filter
-                </button>
+                </select>
                 <Link
                   href="/issues"
                   className="inline-flex h-10 items-center rounded-lg border px-3 text-xs"

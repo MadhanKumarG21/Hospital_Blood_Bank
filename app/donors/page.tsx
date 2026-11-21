@@ -7,7 +7,6 @@ import {
   Plus,
   SlidersHorizontal,
   Download,
-  MoreHorizontal,
   ChevronLeft,
   ChevronRight,
   X,
@@ -17,10 +16,14 @@ import {
   ArrowUpDown,
   Droplet,
   UserPlus,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import {
   listDonors,
   createDonor,
+  updateDonor,
+  deleteDonor,
   donorRegistrationSchema,
   type DonorRegistrationInput,
 } from "@/lib/db/donors";
@@ -91,11 +94,15 @@ export default function DonorsPage() {
   const [groupFilter, setGroupFilter] = useState("All groups");
   const [typeFilter, setTypeFilter] = useState("All types");
   const [modal, setModal] = useState(false);
+  const [editing, setEditing] = useState<Donor | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Donor | null>(null);
   const [errors, setErrors] = useState<FormErrors>({});
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [phoneDigits, setPhoneDigits] = useState("");
+  const [editPhoneDigits, setEditPhoneDigits] = useState("");
   const [page, setPage] = useState(1);
   const filtered = useMemo(
     () =>
@@ -112,6 +119,7 @@ export default function DonorsPage() {
   );
   const pageCount = Math.max(1, Math.ceil(filtered.length / 10));
   async function submit(formData: FormData) {
+    formData.set("phone", `+91${phoneDigits}`);
     const raw = Object.fromEntries(formData.entries());
     const parsed = donorRegistrationSchema.safeParse(raw);
     if (!parsed.success) {
@@ -137,6 +145,60 @@ export default function DonorsPage() {
       setSaving(false);
     }
   }
+
+  async function updateSubmit(formData: FormData) {
+    formData.set("phone", `+91${formData.get("phone")}`);
+    const raw = Object.fromEntries(formData.entries());
+    const parsed = donorRegistrationSchema.safeParse(raw);
+    if (!parsed.success) {
+      setErrors(parsed.error.flatten().fieldErrors as FormErrors);
+      return;
+    }
+    if (!editing) return;
+    setErrors({});
+    setSaveError("");
+    setSaving(true);
+    try {
+      await updateDonor(editing.id, parsed.data);
+      await mutate();
+      setEditing(null);
+      setSuccess(true);
+      window.setTimeout(() => setSuccess(false), 2800);
+    } catch (reason) {
+      setSaveError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to update the donor record.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!deletingId) return;
+    setSaving(true);
+    try {
+      await deleteDonor(deletingId);
+      await mutate();
+      setDeletingId(null);
+      setEditing(null);
+      if (selected?.id === deletingId) setSelected(null);
+      setSuccess(true);
+      window.setTimeout(() => setSuccess(false), 2800);
+    } catch (reason) {
+      setSaveError(
+        reason instanceof Error
+          ? reason.message
+          : "Unable to delete the donor record.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const phoneValid = /^[6-9]\d{9}$/.test(phoneDigits);
+
   return (
     <AppShell>
       <main className="mx-auto max-w-[1500px] px-5 py-7 md:px-8 md:py-9">
@@ -232,7 +294,7 @@ export default function DonorsPage() {
                 Search and manage registered blood donors
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="relative min-w-[200px] flex-1 md:flex-none">
                 <Search
                   size={15}
@@ -244,9 +306,9 @@ export default function DonorsPage() {
                     setQuery(e.target.value);
                     setPage(1);
                   }}
-                  placeholder="Search donors..."
+                  placeholder="Search by name, phone or donor ID..."
                   aria-label="Search donors"
-                  className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none placeholder:text-slate-400 focus:border-[#cf7373] focus:ring-2 focus:ring-red-100 md:w-[230px]"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-xs outline-none placeholder:text-slate-400 focus:border-[#cf7373] focus:ring-2 focus:ring-red-100 md:w-[250px]"
                 />
               </label>
               <select
@@ -258,7 +320,7 @@ export default function DonorsPage() {
                 aria-label="Filter by blood group"
                 className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] text-slate-600 outline-none"
               >
-                <option>All groups</option>
+                <option>All blood groups</option>
                 {groups.map((group) => (
                   <option key={group}>{group}</option>
                 ))}
@@ -272,10 +334,27 @@ export default function DonorsPage() {
                 aria-label="Filter by donor type"
                 className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] text-slate-600 outline-none"
               >
-                <option>All types</option>
+                <option>All donor types</option>
                 <option value="voluntary">Voluntary</option>
                 <option value="replacement">Replacement</option>
               </select>
+              {(
+                query !== "" ||
+                groupFilter !== "All groups" ||
+                typeFilter !== "All types"
+              ) && (
+                <button
+                  onClick={() => {
+                    setQuery("");
+                    setGroupFilter("All groups");
+                    setTypeFilter("All types");
+                    setPage(1);
+                  }}
+                  className="text-xs underline underline-offset-4 text-slate-500 hover:text-[#b91c1c]"
+                >
+                  Clear filters
+                </button>
+              )}
               <button
                 aria-label="Export donors"
                 onClick={() => downloadDonorCsv(filtered)}
@@ -367,13 +446,29 @@ export default function DonorsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3.5">
-                      <button
-                        aria-label={`More actions for ${donor.name}`}
-                        onClick={() => setSelected(donor)}
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100"
-                      >
-                        <MoreHorizontal size={16} />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditPhoneDigits(
+                              (donor.phone || "").replace("+91", ""),
+                            );
+                            setEditing(donor);
+                          }}
+                          aria-label={`Edit ${donor.name}`}
+                          className="rounded p-1 text-[#b91c1c] hover:bg-red-50"
+                          title="Edit donor"
+                        >
+                          <Pencil size={13} />
+                        </button>
+                        <button
+                          onClick={() => setDeletingId(donor.id)}
+                          aria-label={`Delete ${donor.name}`}
+                          className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-700"
+                          title="Delete donor"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -490,58 +585,92 @@ export default function DonorsPage() {
                 className="p-5"
               >
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  {(
-                    [
-                      {
-                        name: "name",
-                        label: "Full name",
-                        type: "text",
-                        placeholder: "e.g. Jordan Lee",
-                      },
-                      {
-                        name: "phone",
-                        label: "Phone number",
-                        type: "tel",
-                        placeholder: "+919876543210",
-                      },
-                      { name: "dob", label: "Date of birth", type: "date" },
-                      {
-                        name: "address",
-                        label: "Address",
-                        type: "text",
-                        placeholder: "Street address",
-                      },
-                    ] as const
-                  ).map((field) => (
-                    <label
-                      key={field.name}
-                      className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600"
-                    >
-                      {field.label}
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Full name
+                    <input
+                      name="name"
+                      type="text"
+                      required
+                      placeholder="e.g. Jordan Lee"
+                      aria-invalid={Boolean(errors.name)}
+                      className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                    />
+                    {errors.name && (
+                      <span className="font-normal text-red-600">
+                        {errors.name}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Phone number
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">
+                        +91
+                      </span>
                       <input
-                        name={field.name}
-                        type={field.type}
+                        name="phone"
+                        type="tel"
+                        inputMode="tel"
                         required
-                        maxLength={field.name === "phone" ? 13 : undefined}
-                        max={
-                          field.name === "dob"
-                            ? new Date().toISOString().slice(0, 10)
-                            : undefined
-                        }
-                        inputMode={field.name === "phone" ? "tel" : undefined}
-                        placeholder={
-                          "placeholder" in field ? field.placeholder : undefined
-                        }
-                        aria-invalid={Boolean(errors[field.name])}
-                        className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                        maxLength={10}
+                        value={phoneDigits}
+                        onChange={(e) => {
+                          setPhoneDigits(e.target.value.replace(/\D/g, "").slice(0, 10));
+                        }}
+                        placeholder="9876543210"
+                        aria-invalid={Boolean(Boolean(errors.phone) || (phoneDigits && !phoneValid))}
+                        className="h-10 rounded-lg border border-slate-200 pl-10 pr-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
                       />
-                      {errors[field.name] && (
-                        <span className="font-normal text-red-600">
-                          {errors[field.name]}
-                        </span>
-                      )}
-                    </label>
-                  ))}
+                    </div>
+                    {phoneDigits && !phoneValid && (
+                      <span className="font-normal text-red-600">
+                        Enter a valid 10-digit mobile number
+                      </span>
+                    )}
+                    {errors.phone && (
+                      <span className="font-normal text-red-600">
+                        {errors.phone}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Date of birth
+                    <div className="relative">
+                      <CalendarDays
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <input
+                        name="dob"
+                        type="date"
+                        required
+                        max={new Date().toISOString().slice(0, 10)}
+                        aria-invalid={Boolean(errors.dob)}
+                        className="h-10 rounded-lg border border-slate-200 pl-8 pr-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                      />
+                    </div>
+                    {errors.dob && (
+                      <span className="font-normal text-red-600">
+                        {errors.dob}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Address
+                    <input
+                      name="address"
+                      type="text"
+                      required
+                      placeholder="Street address"
+                      aria-invalid={Boolean(errors.address)}
+                      className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                    />
+                    {errors.address && (
+                      <span className="font-normal text-red-600">
+                        {errors.address}
+                      </span>
+                    )}
+                  </label>
                   <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
                     Gender
                     <select
@@ -594,6 +723,248 @@ export default function DonorsPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+        {editing && (
+          <div
+            role="presentation"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) {
+                setEditing(null);
+                setEditPhoneDigits("");
+              }
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="edit-donor-title"
+              className="w-full max-w-[530px] rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="flex items-start justify-between border-b border-slate-100 p-5">
+                <div>
+                  <h2 id="edit-donor-title" className="text-base font-bold text-slate-900">
+                    Edit donor
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Update the donor record for {editing.name}.
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditing(null);
+                    setEditPhoneDigits("");
+                  }}
+                  aria-label="Close"
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void updateSubmit(new FormData(event.currentTarget));
+                }}
+                className="p-5"
+              >
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Full name
+                    <input
+                      name="name"
+                      type="text"
+                      required
+                      defaultValue={editing.name}
+                      aria-invalid={Boolean(errors.name)}
+                      className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                    />
+                    {errors.name && (
+                      <span className="font-normal text-red-600">
+                        {errors.name}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Phone number
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">
+                        +91
+                      </span>
+                      <input
+                        name="phone"
+                        type="tel"
+                        inputMode="tel"
+                        required
+                        maxLength={10}
+                        value={editPhoneDigits}
+                        onChange={(e) => {
+                          setEditPhoneDigits(
+                            e.target.value.replace(/\D/g, "").slice(0, 10),
+                          );
+                        }}
+                        placeholder="9876543210"
+                        aria-invalid={
+                          Boolean(
+                            Boolean(errors.phone) ||
+                              (editPhoneDigits &&
+                                /^[6-9]\d{9}$/.test(editPhoneDigits) === false),
+                          )
+                        }
+                        className="h-10 rounded-lg border border-slate-200 pl-10 pr-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                      />
+                    </div>
+                    {editPhoneDigits && /^[6-9]\d{9}$/.test(editPhoneDigits) === false && (
+                      <span className="font-normal text-red-600">
+                        Enter a valid 10-digit mobile number
+                      </span>
+                    )}
+                    {errors.phone && (
+                      <span className="font-normal text-red-600">
+                        {errors.phone}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Date of birth
+                    <div className="relative">
+                      <CalendarDays
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                      />
+                      <input
+                        name="dob"
+                        type="date"
+                        required
+                        defaultValue={editing.dob}
+                        max={new Date().toISOString().slice(0, 10)}
+                        aria-invalid={Boolean(errors.dob)}
+                        className="h-10 rounded-lg border border-slate-200 pl-8 pr-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                      />
+                    </div>
+                    {errors.dob && (
+                      <span className="font-normal text-red-600">
+                        {errors.dob}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Address
+                    <input
+                      name="address"
+                      type="text"
+                      required
+                      defaultValue={editing.address}
+                      aria-invalid={Boolean(errors.address)}
+                      className="h-10 rounded-lg border border-slate-200 px-3 text-xs font-normal outline-none focus:border-[#cd7070] focus:ring-2 focus:ring-red-100"
+                    />
+                    {errors.address && (
+                      <span className="font-normal text-red-600">
+                        {errors.address}
+                      </span>
+                    )}
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Gender
+                    <select
+                      required
+                      name="gender"
+                      defaultValue={editing.gender}
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-normal"
+                    >
+                      <option>Female</option>
+                      <option>Male</option>
+                      <option>Other</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600">
+                    Blood group
+                    <select
+                      required
+                      name="bloodGroup"
+                      defaultValue={editing.bloodGroup}
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-normal"
+                    >
+                      {groups.map((group) => (
+                        <option key={group}>{group}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-semibold text-slate-600 sm:col-span-2">
+                    Donor type
+                    <select
+                      required
+                      name="donorType"
+                      defaultValue={editing.donorType}
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-xs font-normal"
+                    >
+                      <option value="voluntary">Voluntary</option>
+                      <option value="replacement">Replacement</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-6 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditing(null);
+                      setEditPhoneDigits("");
+                    }}
+                    className="h-9 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={saving}
+                    className="h-9 rounded-lg bg-[#b91c1c] px-4 text-xs font-semibold text-white hover:bg-[#991b1b] disabled:opacity-60"
+                  >
+                    {saving ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+        {deletingId && (
+          <div
+            role="presentation"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setDeletingId(null);
+            }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-donor-title"
+              className="w-full max-w-[360px] rounded-2xl bg-white shadow-2xl"
+            >
+              <div className="border-b border-slate-100 p-5">
+                <h2 id="delete-donor-title" className="text-base font-bold text-slate-900">
+                  Delete donor?
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  This cannot be undone. All records for this donor will be
+                  removed.
+                </p>
+              </div>
+              <div className="p-5 flex justify-end gap-2">
+                <button
+                  onClick={() => setDeletingId(null)}
+                  className="h-9 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={saving}
+                  className="h-9 rounded-lg bg-[#b91c1c] px-4 text-xs font-semibold text-white hover:bg-[#991b1b] disabled:opacity-60"
+                >
+                  {saving ? "Deleting…" : "Delete donor"}
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -685,6 +1056,27 @@ export default function DonorsPage() {
                 <button className="mt-5 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#b91c1c] text-xs font-semibold text-white">
                   <Plus size={15} /> Start collection
                 </button>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setEditPhoneDigits((selected.phone || "").replace("+91", ""));
+                      setEditing(selected);
+                      setSelected(null);
+                    }}
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  >
+                    <Pencil size={13} /> Edit
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDeletingId(selected.id);
+                      setSelected(null);
+                    }}
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-red-50 hover:text-red-700"
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
+                </div>
               </div>
             </aside>
           </div>

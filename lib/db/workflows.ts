@@ -11,6 +11,7 @@ import {
   updateDoc,
   where,
   writeBatch,
+  deleteDoc,
   type DocumentData,
   type QuerySnapshot,
 } from "firebase/firestore";
@@ -512,6 +513,53 @@ export async function createCollection(input: {
     `450 mL collected from ${donor.name}.`,
   );
   return donation;
+}
+
+export async function updateCollection(
+  id: string,
+  input: Partial<{
+    hb: number;
+    weight: number;
+    bp: string;
+    pulse: number;
+    temp: number;
+    status: Donation["status"];
+  }>,
+) {
+  userId();
+  const donation = workflowData.donations.find((item) => item.id === id);
+  if (!donation)
+    throw new Error("Collection not found. Refresh the list and try again.");
+  const updated: Donation = { ...donation, ...input };
+  const index = workflowData.donations.findIndex((item) => item.id === id);
+  workflowData.donations[index] = updated;
+  if (firestore && isFirebaseConfigured)
+    await updateDoc(doc(firestore, "donations", id), updated);
+  await addAudit(
+    "Collection updated",
+    "Donation",
+    donation.bagNumber,
+    `Updated collection record ${donation.bagNumber}.`,
+  );
+  return updated;
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  userId();
+  const donation = workflowData.donations.find((item) => item.id === id);
+  if (!donation)
+    throw new Error("Collection not found. Refresh the list and try again.");
+  workflowData.donations = workflowData.donations.filter(
+    (item) => item.id !== id,
+  );
+  if (firestore && isFirebaseConfigured)
+    await deleteDoc(doc(firestore, "donations", id));
+  await addAudit(
+    "Collection deleted",
+    "Donation",
+    donation.bagNumber,
+    `Deleted collection record ${donation.bagNumber}.`,
+  );
 }
 
 export async function recordBloodTests(
@@ -1076,6 +1124,39 @@ export async function issueBloodUnit(
     `Issued to ${request.patient} on request ${requestId}.`,
   );
   return issue;
+}
+
+export async function cancelBloodRequest(requestId: string): Promise<void> {
+  userId();
+  const request = workflowData.requests.find((item) => item.id === requestId);
+  if (!request) throw new Error("Request not found.");
+  if (["Issued", "Cancelled"].includes(request.status))
+    throw new Error("This request is already closed and cannot be cancelled.");
+  const hasIssuedUnits =
+    (request.issuedUnits ?? workflowData.issues.filter((i) => i.requestId === requestId).length) > 0;
+  if (hasIssuedUnits)
+    throw new Error("Cannot cancel a request that already has issued units.");
+  // Release any reserved units tied to this request
+  for (const unit of workflowData.units) {
+    if (unit.reservedForRequest === requestId && unit.status === "reserved") {
+      unit.status = "available";
+      unit.reservedForRequest = undefined;
+      if (firestore && isFirebaseConfigured)
+        await updateDoc(doc(firestore, "units", unit.id), {
+          status: "available",
+          reservedForRequest: null,
+        });
+    }
+  }
+  if (firestore && isFirebaseConfigured)
+    await updateDoc(doc(firestore, "requests", requestId), { status: "Cancelled" });
+  request.status = "Cancelled";
+  await addAudit(
+    "Request cancelled",
+    "Request",
+    requestId,
+    `Cancelled request for ${request.patient}.`,
+  );
 }
 export async function discardBloodUnit(
   unitId: string,

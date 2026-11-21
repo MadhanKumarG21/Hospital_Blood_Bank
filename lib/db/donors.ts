@@ -1,4 +1,4 @@
-import { collection, getDocs, doc, query, orderBy, setDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, query, orderBy, setDoc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { z } from 'zod'
 import { firestore } from '../firebase'
 import { seedDonors } from '../seed'
@@ -33,4 +33,38 @@ export async function createDonor(input: DonorRegistrationInput): Promise<Donor>
   const persistedDonor = { ...donor, id: reference.id, donorId: `DN-${reference.id.slice(0, 8).toUpperCase()}` }
   await setDoc(reference, persistedDonor)
   return persistedDonor
+}
+
+export async function updateDonor(id: string, input: Partial<Donor>): Promise<Donor> {
+  const index = memoryDonors.findIndex(d => d.id === id || d.donorId === id)
+  if (index === -1) throw new Error('Donor record not found.')
+  const existing = memoryDonors[index]
+  const updated: Donor = {
+    ...existing,
+    ...input,
+    deferral: input.deferral ? { ...existing.deferral, ...input.deferral } : existing.deferral,
+  }
+  memoryDonors[index] = updated
+
+  if (firestore) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error('An internet connection is required to update donor records safely.')
+    }
+    await updateDoc(doc(firestore, 'donors', existing.id), updated)
+  }
+  return updated
+}
+
+export async function deleteDonor(id: string): Promise<void> {
+  const index = memoryDonors.findIndex(d => d.id === id || d.donorId === id)
+  if (index === -1) throw new Error('Donor record not found.')
+  const existing = memoryDonors[index]
+  memoryDonors.splice(index, 1)
+
+  if (firestore) {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      throw new Error('An internet connection is required to delete donor records safely.')
+    }
+    await deleteDoc(doc(firestore, 'donors', existing.id))
+  }
 }
