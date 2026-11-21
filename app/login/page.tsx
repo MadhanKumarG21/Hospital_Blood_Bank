@@ -13,7 +13,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import { auth, isFirebaseConfigured } from "@/lib/firebase";
-
+ 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
